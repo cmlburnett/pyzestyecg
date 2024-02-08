@@ -1,4 +1,5 @@
 
+import io
 import os
 import pickle
 
@@ -46,244 +47,429 @@ def ApplyFilter(x, b):
 	ret = scipy.signal.filtfilt(np.array(b), np.array([1]), np.array(x))
 	return ret
 
-def runecg(fname):
-	params = {
-		'HilbertLength': 49,
-		'Smoothing1': 10,
-		'Smoothing2': 20,
-		'WindowWidthMax': 50,
-		'MaximumWindowWidth': 40,
-		'RatioCutoff': 0.02,
-		'Cutoffs': {
-			'varPercentile': {
-				'minimum': (1000.0, -100),
-				'desired': (5000.0, +1),
+def pyzestyecg:
+	def __init__(self, wiff, params=None):
+		default = __class__.GetDefaultParams()
+
+		# Copy defaults and update if provided
+		a = dict(default)
+		if params is not None:
+			a.update(params)
+
+		self._wiff = wiff
+		self._params = a
+
+	@staticmethod
+	def GetDefaultParams():
+		return {
+			'HilbertLength': 49,
+			'Smoothing1': 10,
+			'Smoothing2': 20,
+			'WindowWidthMax': 50,
+			'MaximumWindowWidth': 40,
+			'RatioCutoff': 0.02,
+			'Cutoffs': {
+				'varPercentile': {
+					'minimum': (1000.0, -100),
+					'desired': (5000.0, +1),
+				},
+				'Points': 4,
 			},
-			'Points': 4,
-		},
-		'LeadCorrelateWindow': 10,
-		'PNG': {
-			'speed': 200,
-			'width': 20,
-		},
-	}
+			'LeadCorrelateWindow': 10,
+			'PNG': {
+				'speed': 200,
+				'width': 20,
+			},
+		}
 
-	# Things to do:
-	#  1) Read in data
-	#  2) Correlate peaks against peaks in other leads within params['LeadCorrelateWindow'] window
-	#  3) Index list of keys (indices) to keep, which is keyed off of the lead name
-	#     Also keep a similar list of point scores for each criteria for each peak
-	#  4) Iterate through all peaks and filter some out based on paramters
-	#  5) Remove peaks based on lake of correlation with other leads
-	#  6) Fill in gaps using RR intervals and concept of harmonics
-	#     6A) Calculate RR intervals
-	#     6B) Calculate histogram of RR intervals
-	#     6C) Average of histogram should be greater (or equal to) fundamental harmonic
-	#     6D) Truncate histogram to (6C) average is assumed to be close to fundamental RR interval
-	#     6E) Find integer gaps and fill them in if able
-	#     6F) If a peak is non-harmonic then assume it's a P wave or PVC or something and just ignore it
-	# 7) Export to PNG
-	# 8) Calculate R-R intervals
+	@property
+	def WIFF(self):
+		return self._wiff
 
-	# 1)
-	fname_dat = fname + '.pypickle'
-	if os.path.exists(fname_dat):
-		with open(fname_dat, 'rb') as f:
-			z = pickle.load(f)
+	@property
+	def Params(self):
+		return self._params
+
+	def GetPotentialsAndPeaks(self, ignore, noise):
+		"""
+		Get the potential peaks and filtered peaks from the raw data.
+		Use the @ignore list of (start,stop) tuples of regions to ignore and not analyze.
+		"""
+
+		dat = None
+		i = None
+		chans = None
+
+		potentials = None
+		peaks = None
+
+		# Convert to ranges, easier to use logic against it
+		rignores = [range(_[0],_[1]) for _ in ignore]
+		rnoise = [range(_[0],_[1]) for _ in noise]
+
+		# Iterate over the data and put into arrays
+		for fidx,chans,samps in self.WIFF.recording[1].GetAllFrames():
+			if dat is None:
+				# Avoid doing this every iteration since it doesn't change
+				i = len(chans)
+				dat = [[]] * i
+				potentials = {_:[] for _ in chans}
+				peaks = {_:[] for _ in chans}
+
+			for i in range(i):
+				dat[i].append(samps[i])
+
+		# Data loaded, now process
+		for cidx,cname in enumerate(chans):
+			potentials[cname], peaks[cname] = processecg_single(cname, dat[cidx], self.Params, rignores, rnoise)
+
+		return (potentials, peaks)
+
+	def GetCorrelate(self, chans, potentials, peaks, params):
+		return correlateleads(chans, potentials, peaks, params)
+
+	def GetKeepKeys(self, chans, peaks):
+		keep_keys = {k:[] for k in peaks.keys()}
+		points = {k:{} for k in peaks.keys()}
+
+		# 4)
+		# NOTE: This is currently just empirically determined, better if some sort of non-linear model (ie, "AI") were used instead
+		for cname in peaks.keys():
+			for k in sorted(peaks[cname].keys()):
+				v = peaks[cname][k]
+
+				p = scoreit(params, cname, k, v)
+				points[cname][k] = p
+
+				if sum(p) >= params['Cutoffs']['Points']:
+					print([cname, k, k/2000, sum(p), p, 'keep'])
+					keep_keys[cname].append(k)
+				else:
+					print([cname, k, k/2000, sum(p), p, 'pass'])
+
+		return (points, keep_keys)
+
+	def GetRemoveKeys(self, chans, correlate, points, keep):
+		remove = []
+		for cname,v in keep_keys.items():
+			for k in v:
+				# Get correlated indices and current points for this peak
+				corr = correlate[cname][k]
+				corr_len = [len(_) > 0 for _ in corr].count(True)
+				p = points[cname][k]
+
+				# Iterate thrugh other leads and check how
+				idx = 0
+				cnt = 0
+				for n in header[1:]:
+					if n == cname: continue
+
+					# Check that any of the peaks correlated for each lead scored enough points to be kept
+					if any([_ for _ in corr[idx] if _ in keep_keys[n]]):
+						if cname == 'Lead I' and k == 112925:
+							print(['Correlate lead yes', cname, k, n])
+						cnt += 1
+
+					idx += 1
+
+				# This peak only matches 0-2 other leads, probably not enough to be a QRS so get rid of it
+				if cnt < 3:
+					remove.append( (cname,k) )
+
+		return remove
+
+	def CheckUserFilter(self, chans, points, keep, remove, user):
+		"""
+		Check that the user list of points @user is valid.
+		"""
+		return
+
+	def CalculateRR(self, chans, keep, remove, user, intervals, noise, params):
+		"""
+		Calculate RR based on the intervals provided.
+		@intervals is a dictionary mapping named regions to a list of (start,stop) frames that are in that named region.
+		@noise is a list of (start,stop) regions that are ignored from analysis as user indicates it is noise.
+		"""
+
+		# 6A)
+		RR = []
+		for cname in keep.keys():
+			RR += [keep[cname][i] - keep[cname][i-1] for i in range(1,len(keep[cname]))]
+		min_RR = min(RR)
+
+		# 6B)
+		histo = {}
+		for k in RR:
+			if k not in histo: histo[k] = 0
+			histo[k] += 1
+
+		# 6C)
+		# The fundamental frequency of a dataset with harmonics necessarily is less than mean of the dataset
+		# (If the dataset contained only a single harmonic then the mean is the fundamental frequency)
+		# So the fundamental frequency is limited to min(histo.keys()) to avg
+		avg = sum([k*v for k,v in histo.items()])/sum(histo.values())
+
+		# 6D)
+		# Get the average of the first harmonic, this average is likely pretty close
+		z = [_ for _ in RR if _ < int(avg)+1]
+		del RR
+		f0 = sum(z)/len(z)
+
+		# 6E)
+		# Now go back through ECG data and find gaps larger than f0, particularly if an integer multiple suggesting missed complexes
+		too_soon = {k:[] for k in header[1:]}
+		for cname in keep.keys():
+			last_k = None
+			for k in sorted(keep[cname]):
+				# Skip first
+				if last_k is None:
+					last_k = k
+					continue
+
+				h = (k-last_k)/f0
+				mult = round(h)
+				print([cname, k, last_k, k-last_k, h, mult])
+
+				if last_k in [_[0] for _ in too_soon[cname]]:
+					print("Don't penalize next peak after Too Soon point")
+					last_k = k
+					continue
+
+				if h < 0.85:
+					# Weird point, probably PAC/PVC or P wave
+					print("Too soon")
+					too_soon[cname].append( (k, last_k, h, mult) )
+					pass
+				elif h < 1.15:
+					# First harmonic, skip it
+					pass
+				else:
+					print("Harmonic")
+					print([last_k, k, mult, list(harmonicrange(last_k, k, mult))])
+					for idx in harmonicrange(last_k, k, mult):
+						findmissingharmonicpeak(peaks, keep, correlate, cname, last_k, k, idx, params, chans)
+
+				# Update index for next loop
+				last_k = k
+
+		# 6F)
+		# TODO: for now just remove them
+		print(too_soon)
+		for cname in too_soon.keys():
+			for k, last_k, h, mult in too_soon[cname]:
+				keep_keys[cname].remove(k)
+
+	def OldCaclulateRR(self):
+
+		# Things to do:
+		#  1) Read in data
+		#  2) Correlate peaks against peaks in other leads within params['LeadCorrelateWindow'] window
+		#  3) Index list of keys (indices) to keep, which is keyed off of the lead name
+		#     Also keep a similar list of point scores for each criteria for each peak
+		#  4) Iterate through all peaks and filter some out based on paramters
+		#  5) Remove peaks based on lake of correlation with other leads
+		#  6) Fill in gaps using RR intervals and concept of harmonics
+		#     6A) Calculate RR intervals
+		#     6B) Calculate histogram of RR intervals
+		#     6C) Average of histogram should be greater (or equal to) fundamental harmonic
+		#     6D) Truncate histogram to (6C) average is assumed to be close to fundamental RR interval
+		#     6E) Find integer gaps and fill them in if able
+		#     6F) If a peak is non-harmonic then assume it's a P wave or PVC or something and just ignore it
+		# 7) Export to PNG
+		# 8) Calculate R-R intervals
+
+		# 1)
+		fname_dat = self.Filename + '.pypickle'
+		if self.CacheExists():
+			z = self.CacheRead()
 			header = z['header']
 			potentials = z['potentials']
 			peaks = z['peaks']
-		header, dat = loadecg(fname)
+			header, dat = loadecg(fname)
 
-	else:
-		# Process the ECG data to get peak information
-		# peaks is indexed by column name
-		header, dat, potentials, peaks = processecg(fname, params)
+		else:
+			# Process the ECG data to get peak information
+			# peaks is indexed by column name
+			header, dat, potentials, peaks = processecg(fname, params)
 
-		with open(fname_dat, 'wb') as f:
-			# Have to do this because keys in json can only be strings
-			pickle.dump( {'header': header, 'potentials': potentials, 'peaks': peaks}, f)
+			self.CacheWrite({'header': header, 'potentials': potentials, 'peaks': peaks})
 
-	# 2)
-	correlate = correlateleads(header, potentials, peaks, params)
+		# 2)
+		correlate = correlateleads(header, potentials, peaks, params)
 
-	# Print out all peaks for debugging
-	for cname in peaks.keys():
-		for k in sorted(peaks[cname]):
-			print([cname, k, peaks[cname][k]])
+		# Print out all peaks for debugging
+		if False:
+			for cname in peaks.keys():
+				for k in sorted(peaks[cname]):
+					print([cname, k, peaks[cname][k]])
 
-	print('-'*80)
-	print('-'*80)
-	print('-'*80)
-	print('-'*80)
+		# 3)
+		keep_keys = {k:[] for k in peaks.keys()}
+		points = {k:{} for k in peaks.keys()}
 
-	# 3)
-	keep_keys = {k:[] for k in peaks.keys()}
-	points = {k:{} for k in peaks.keys()}
+		# 4)
+		# NOTE: This is currently just empirically determined, better if some sort of non-linear model (ie, "AI") were used instead
+		for cname in peaks.keys():
+			for k in sorted(peaks[cname].keys()):
+				v = peaks[cname][k]
 
-	# 4)
-	# NOTE: This is currently just empirically determined, better if some sort of non-linear model (ie, "AI") were used instead
-	for cname in peaks.keys():
-		for k in sorted(peaks[cname].keys()):
-			v = peaks[cname][k]
+				p = scoreit(params, cname, k, v)
+				points[cname][k] = p
 
-			p = scoreit(params, cname, k, v)
-			points[cname][k] = p
+				if sum(p) >= params['Cutoffs']['Points']:
+					print([cname, k, k/2000, sum(p), p, 'keep'])
+					keep_keys[cname].append(k)
+				else:
+					print([cname, k, k/2000, sum(p), p, 'pass'])
 
-			if sum(p) >= params['Cutoffs']['Points']:
-				print([cname, k, k/2000, sum(p), p, 'keep'])
-				keep_keys[cname].append(k)
-			else:
-				print([cname, k, k/2000, sum(p), p, 'pass'])
+		# 5)
+		remove = []
+		for cname,v in keep_keys.items():
+			for k in v:
+				# Get correlated indices and current points for this peak
+				corr = correlate[cname][k]
+				corr_len = [len(_) > 0 for _ in corr].count(True)
+				p = points[cname][k]
 
-	# 5)
-	remove = []
-	for cname,v in keep_keys.items():
-		for k in v:
-			# Get correlated indices and current points for this peak
-			corr = correlate[cname][k]
-			corr_len = [len(_) > 0 for _ in corr].count(True)
-			p = points[cname][k]
+				# Iterate thrugh other leads and check how
+				idx = 0
+				cnt = 0
+				for n in header[1:]:
+					if n == cname: continue
 
-			# Iterate thrugh other leads and check how
-			idx = 0
-			cnt = 0
-			for n in header[1:]:
-				if n == cname: continue
+					# Check that any of the peaks correlated for each lead scored enough points to be kept
+					if any([_ for _ in corr[idx] if _ in keep_keys[n]]):
+						if cname == 'Lead I' and k == 112925:
+							print(['Correlate lead yes', cname, k, n])
+						cnt += 1
 
-				# Check that any of the peaks correlated for each lead scored enough points to be kept
-				if any([_ for _ in corr[idx] if _ in keep_keys[n]]):
-					if cname == 'Lead I' and k == 112925:
-						print(['Correlate lead yes', cname, k, n])
-					cnt += 1
+					idx += 1
 
-				idx += 1
+				# This peak only matches 0-2 other leads, probably not enough to be a QRS so get rid of it
+				if cnt < 3:
+					remove.append( (cname,k) )
 
-			# This peak only matches 0-2 other leads, probably not enough to be a QRS so get rid of it
-			if cnt < 3:
-				remove.append( (cname,k) )
+				if cname == 'Lead I' and k == 112925:
+					print(['corr', corr, corr_len, p, cnt])
+					print([(cname, k), n, cnt, 'remove'])
 
-			if cname == 'Lead I' and k == 112925:
-				print(['corr', corr, corr_len, p, cnt])
-				print([(cname, k), n, cnt, 'remove'])
-
-	# Remove them
-	for cname,k in remove:
-		keep_keys[cname].remove(k)
-
-	# 6A)
-	RR = []
-	for cname in keep_keys.keys():
-		RR += [keep_keys[cname][i] - keep_keys[cname][i-1] for i in range(1,len(keep_keys[cname]))]
-	min_RR = min(RR)
-
-	# 6B)
-	histo = {}
-	for k in RR:
-		if k not in histo: histo[k] = 0
-		histo[k] += 1
-
-	# 6C)
-	# The fundamental frequency of a dataset with harmonics necessarily is less than mean of the dataset
-	# (If the dataset contained only a single harmonic then the mean is the fundamental frequency)
-	# So the fundamental frequency is limited to min(histo.keys()) to avg
-	avg = sum([k*v for k,v in histo.items()])/sum(histo.values())
-
-	# 6D)
-	# Get the average of the first harmonic, this average is likely pretty close
-	z = [_ for _ in RR if _ < int(avg)+1]
-	del RR
-	f0 = sum(z)/len(z)
-
-	# 6E)
-	# Now go back through ECG data and find gaps larger than f0, particularly if an integer multiple suggesting missed complexes
-	too_soon = {k:[] for k in header[1:]}
-	for cname in keep_keys.keys():
-		last_k = None
-		for k in sorted(keep_keys[cname]):
-			# Skip first
-			if last_k is None:
-				last_k = k
-				continue
-
-			h = (k-last_k)/f0
-			mult = round(h)
-			print([cname, k, last_k, k-last_k, h, mult])
-
-			if last_k in [_[0] for _ in too_soon[cname]]:
-				print("Don't penalize next peak after Too Soon point")
-				last_k = k
-				continue
-
-			if h < 0.85:
-				# Weird point, probably PAC/PVC or P wave
-				print("Too soon")
-				too_soon[cname].append( (k, last_k, h, mult) )
-				pass
-			elif h < 1.15:
-				# First harmonic, skip it
-				pass
-			else:
-				print("Harmonic")
-				print([last_k, k, mult, list(harmonicrange(last_k, k, mult))])
-				for idx in harmonicrange(last_k, k, mult):
-					findmissingharmonicpeak(peaks, keep_keys, correlate, cname, last_k, k, idx, params, header)
-
-			# Update index for next loop
-			last_k = k
-
-	# 6F)
-	# TODO: for now just remove them
-	print(too_soon)
-	for cname in too_soon.keys():
-		for k, last_k, h, mult in too_soon[cname]:
+		# Remove them
+		for cname,k in remove:
 			keep_keys[cname].remove(k)
 
-	if False:
-		print("Kept")
-		print("index\tTime\tpreRank.N\tpreRank.min\tpreRank.max\tpreRank.mean\tsum/mean%max.N\tsum/mean%max.min\tsum/mean%max.max\tsum/mean%max.mean\tpeakPercentile\tvarPercentile")
-		for k in keep_keys:
-			_ = peaks[k]
-			print(k, end='\t')
-			print(k/2000, end='\t')
-			print(len(_['preRank']), end='\t')
-			print(min(_['preRank']), end='\t')
-			print(max(_['preRank']), end='\t')
-			print(sum(_['preRank'])/len(_['preRank']), end='\t')
-			print(len(_['sum/mean%max']), end='\t')
-			print(min(_['sum/mean%max']), end='\t')
-			print(max(_['sum/mean%max']), end='\t')
-			print(sum(_['sum/mean%max'])/len(_['sum/mean%max']), end='\t')
-			print(_['peakPercentile'], end='\t')
-			print(_['varPercentile'])
+		# 6A)
+		RR = []
+		for cname in keep_keys.keys():
+			RR += [keep_keys[cname][i] - keep_keys[cname][i-1] for i in range(1,len(keep_keys[cname]))]
+		min_RR = min(RR)
 
-		print()
-		print("Rejected")
-		print("index\tTime\t\tpreRank.N\tpreRank.min\tpreRank.max\tpreRank.mean\tsum/mean%max.N\tsum/mean%max.min\tsum/mean%max.max\tsum/mean%max.mean\tpeakPercentile\tvarPercentile")
-		for k in [_ for _ in peaks.keys() if _ not in keep_keys]:
-			_ = peaks[k]
-			print(k, end='\t')
-			print(k/2000, end='\t')
-			print(len(_['preRank']), end='\t')
-			print(min(_['preRank']), end='\t')
-			print(max(_['preRank']), end='\t')
-			print(sum(_['preRank'])/len(_['preRank']), end='\t')
-			print(len(_['sum/mean%max']), end='\t')
-			print(min(_['sum/mean%max']), end='\t')
-			print(max(_['sum/mean%max']), end='\t')
-			print(sum(_['sum/mean%max'])/len(_['sum/mean%max']), end='\t')
-			print(_['peakPercentile'], end='\t')
-			print(_['varPercentile'])
-		print()
+		# 6B)
+		histo = {}
+		for k in RR:
+			if k not in histo: histo[k] = 0
+			histo[k] += 1
 
-	# 7)
-	ret = ecgtopng(header, dat, keep_keys, width=params['PNG']['width'], speed=params['PNG']['speed'])
+		# 6C)
+		# The fundamental frequency of a dataset with harmonics necessarily is less than mean of the dataset
+		# (If the dataset contained only a single harmonic then the mean is the fundamental frequency)
+		# So the fundamental frequency is limited to min(histo.keys()) to avg
+		avg = sum([k*v for k,v in histo.items()])/sum(histo.values())
 
-	# 8)
-	cname = list(keep_keys.keys())[0]
-	RR = [keep_keys[cname][i] - keep_keys[cname][i-1] for i in range(1,len(keep_keys[cname]))]
-	for r in RR:
-		print(r)
+		# 6D)
+		# Get the average of the first harmonic, this average is likely pretty close
+		z = [_ for _ in RR if _ < int(avg)+1]
+		del RR
+		f0 = sum(z)/len(z)
+
+		# 6E)
+		# Now go back through ECG data and find gaps larger than f0, particularly if an integer multiple suggesting missed complexes
+		too_soon = {k:[] for k in header[1:]}
+		for cname in keep_keys.keys():
+			last_k = None
+			for k in sorted(keep_keys[cname]):
+				# Skip first
+				if last_k is None:
+					last_k = k
+					continue
+
+				h = (k-last_k)/f0
+				mult = round(h)
+				print([cname, k, last_k, k-last_k, h, mult])
+
+				if last_k in [_[0] for _ in too_soon[cname]]:
+					print("Don't penalize next peak after Too Soon point")
+					last_k = k
+					continue
+
+				if h < 0.85:
+					# Weird point, probably PAC/PVC or P wave
+					print("Too soon")
+					too_soon[cname].append( (k, last_k, h, mult) )
+					pass
+				elif h < 1.15:
+					# First harmonic, skip it
+					pass
+				else:
+					print("Harmonic")
+					print([last_k, k, mult, list(harmonicrange(last_k, k, mult))])
+					for idx in harmonicrange(last_k, k, mult):
+						findmissingharmonicpeak(peaks, keep_keys, correlate, cname, last_k, k, idx, params, header)
+
+				# Update index for next loop
+				last_k = k
+
+		# 6F)
+		# TODO: for now just remove them
+		print(too_soon)
+		for cname in too_soon.keys():
+			for k, last_k, h, mult in too_soon[cname]:
+				keep_keys[cname].remove(k)
+
+		if False:
+			print("Kept")
+			print("index\tTime\tpreRank.N\tpreRank.min\tpreRank.max\tpreRank.mean\tsum/mean%max.N\tsum/mean%max.min\tsum/mean%max.max\tsum/mean%max.mean\tpeakPercentile\tvarPercentile")
+			for k in keep_keys:
+				_ = peaks[k]
+				print(k, end='\t')
+				print(k/2000, end='\t')
+				print(len(_['preRank']), end='\t')
+				print(min(_['preRank']), end='\t')
+				print(max(_['preRank']), end='\t')
+				print(sum(_['preRank'])/len(_['preRank']), end='\t')
+				print(len(_['sum/mean%max']), end='\t')
+				print(min(_['sum/mean%max']), end='\t')
+				print(max(_['sum/mean%max']), end='\t')
+				print(sum(_['sum/mean%max'])/len(_['sum/mean%max']), end='\t')
+				print(_['peakPercentile'], end='\t')
+				print(_['varPercentile'])
+
+			print()
+			print("Rejected")
+			print("index\tTime\t\tpreRank.N\tpreRank.min\tpreRank.max\tpreRank.mean\tsum/mean%max.N\tsum/mean%max.min\tsum/mean%max.max\tsum/mean%max.mean\tpeakPercentile\tvarPercentile")
+			for k in [_ for _ in peaks.keys() if _ not in keep_keys]:
+				_ = peaks[k]
+				print(k, end='\t')
+				print(k/2000, end='\t')
+				print(len(_['preRank']), end='\t')
+				print(min(_['preRank']), end='\t')
+				print(max(_['preRank']), end='\t')
+				print(sum(_['preRank'])/len(_['preRank']), end='\t')
+				print(len(_['sum/mean%max']), end='\t')
+				print(min(_['sum/mean%max']), end='\t')
+				print(max(_['sum/mean%max']), end='\t')
+				print(sum(_['sum/mean%max'])/len(_['sum/mean%max']), end='\t')
+				print(_['peakPercentile'], end='\t')
+				print(_['varPercentile'])
+			print()
+
+		# 7)
+		ret = ecgtopng(header, dat, keep_keys, self.WritePNG, width=params['PNG']['width'], speed=params['PNG']['speed'])
+
+		# 8)
+		cname = list(keep_keys.keys())[0]
+		RR = [keep_keys[cname][i] - keep_keys[cname][i-1] for i in range(1,len(keep_keys[cname]))]
+		for r in RR:
+			print(r)
 
 def findmissingharmonicpeak(peaks, keep_keys, correlate, cname, last_k, k, idx, params, header):
 	"""
@@ -411,7 +597,7 @@ def scoreit(params, cname, k, v):
 
 	return p
 
-def ecgtopng(header, dat, peaks, width=20, speed=200, outdir=None, fname_pattern='ecg%04d.png'):
+def ecgtopng(header, dat, peaks, writefunc, width=20, speed=200, outdir=None):
 	"""
 	Convert an ECG to a series of PNG images for slices of the ECG data into @width inches (matlabplot saves in inches) and at @speed mm/sec (sorry, EKG's are printed in mm/sec and I'm not going to make it in inches).
 	The header row @header is used to provide the lead names ([0] should be "Time").
@@ -442,10 +628,6 @@ def ecgtopng(header, dat, peaks, width=20, speed=200, outdir=None, fname_pattern
 	step = int(samps)
 
 	ret = {
-		# Just a list of all files created
-		'files': [],
-		# Map index ranges to file names
-		'segments': {},
 		'start': tstart,
 		'end': tend,
 		'delta': delta,
@@ -495,17 +677,12 @@ def ecgtopng(header, dat, peaks, width=20, speed=200, outdir=None, fname_pattern
 		fig.set_figwidth(width)
 		fig.set_figheight(12)
 
-		# Format output file name
-		fname = "ecg%04d.png" % (idx/step)
-		if outdir is None:
-			fname = os.path.abspath(fname)
-		else:
-			fname = os.path.join(outdir, fname)
+		with io.BytesIO() as f:
+			# Save figure
+			plt.savefig(f, format='png', bbox_inches='tight')
 
-		# Save figure
-		plt.savefig(fname, bbox_inches='tight')
-		ret['files'].append(fname)
-		ret['segments'][r] = fname
+			f.seek(0)
+			writefunc(idx/step, f)
 
 	return ret
 
@@ -572,9 +749,10 @@ def processecg(fname, params):
 
 	return header, dat, potentials, peaks
 
-def processecg_single(cname, dat, params):
+def processecg_single(cname, dat, params, ignores, noises):
 	"""
 	Process a single lead named @cname based on series of samples in @dat and use parameters @params as needed.
+	@rignores is a list of ranges in which samples should be ignored.
 	"""
 
 	# Steps to the algorithm:
@@ -748,6 +926,19 @@ def processecg_single(cname, dat, params):
 	for k in sorted(potentials.keys()):
 		v = potentials[k]
 		idx = potentials[k]['Maximum']['idx']
+
+		potentials[k]['ignored'] = False
+		potentials[k]['noisy'] = False
+
+		# Instructed to ignore it
+		if any([idx in _ for _ in ignores]):
+			potentials[k]['ignored'] = True
+			continue
+		if any([idx in _ for _ in noise]):
+			potentials[k]['noisy'] = True
+			continue
+
+		# Not ignored or in band of noise
 
 		if idx not in peaks:
 			var = variances[idx]
