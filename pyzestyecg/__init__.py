@@ -1,5 +1,5 @@
-
 import io
+import math
 import os
 import pickle
 
@@ -47,7 +47,7 @@ def ApplyFilter(x, b):
 	ret = scipy.signal.filtfilt(np.array(b), np.array([1]), np.array(x))
 	return ret
 
-def pyzestyecg:
+class pyzestyecg:
 	def __init__(self, wiff, params=None):
 		default = __class__.GetDefaultParams()
 
