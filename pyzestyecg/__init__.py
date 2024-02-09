@@ -934,7 +934,7 @@ def processecg_single(cname, dat, params, ignores, noises):
 		if any([idx in _ for _ in ignores]):
 			potentials[k]['ignored'] = True
 			continue
-		if any([idx in _ for _ in noise]):
+		if any([idx in _ for _ in noises]):
 			potentials[k]['noisy'] = True
 			continue
 
