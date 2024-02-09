@@ -116,8 +116,8 @@ class pyzestyecg:
 				potentials = {_:[] for _ in chans}
 				peaks = {_:[] for _ in chans}
 
-			for i in range(i):
-				dat[i].append(samps[i])
+			for n in range(i):
+				dat[n].append(samps[n])
 
 		# Data loaded, now process
 		for cidx,cname in enumerate(chans):
