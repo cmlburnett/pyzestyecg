@@ -802,11 +802,13 @@ def processecg_single(cname, dat, params, ignores, noises):
 
 	# 8)
 	ones = [1] * params['Smoothing2']
-	f5 = [0] * (len(f4) - len(ones))
+	len_ones = len(ones)
+	f5 = [0] * (len(f4) - len_ones)
 	for i in range(len(f5)):
-		for k in range(len(ones)):
-			f5[i] += f4[i-k-len(ones)] * ones[k]
-		f5[i] /= len(ones)
+		for k in range(len_ones):
+			f5[i] += f4[i-k-len_ones]
+	for i in range(len(f5)):
+		f5[i] /= len_ones
 
 	# 9)
 	f6 = [f5[i+1] - f5[i] for i in range(len(f5)-1)]
