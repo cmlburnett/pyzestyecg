@@ -865,10 +865,19 @@ def processecg_single(cname, dat, params, ignores, noises):
 
 	# 10B)
 	# Calculate rank of pre-areas and normalize to [0,1]
-	preareas = [_['pre'] for _ in potentials.values()]
-	preareas.sort()
-	for k in potentials.keys():
-		potentials[k]['preRank'] = preareas.index(potentials[k]['pre']) / len(preareas)
+	print(['J', cname, datetime.datetime.utcnow()])
+
+	# Sort by pre area
+	preareas = []
+	for k,v in potentials.items():
+		preareas.append( (k, v['pre']) )
+	preareas.sort(key=lambda _:_[1])
+	preareas_len = len(preareas)
+
+	# Get rank and normalize to [0,1]
+	for idx,v in enumerate(preareas):
+		k = v[0]
+		potentials[k]['preRank'] = idx / preareas_len
 
 	# 10C)
 	# Calculate percentile of maximum sum/mean values
