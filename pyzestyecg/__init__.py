@@ -1,7 +1,9 @@
+import datetime
 import io
 import math
 import os
 import pickle
+import sys
 
 import numpy as np
 import scipy
@@ -125,8 +127,30 @@ class pyzestyecg:
 
 		return (potentials, peaks)
 
-	def GetCorrelate(self, chans, potentials, peaks, params):
-		return correlateleads(chans, potentials, peaks, params)
+	def GetCorrelate(self, chans, potentials, peaks):
+		"""
+		Correlated peaks across leads (they don't always happen at the same time index.
+		"""
+
+		keys = {}
+		correlate = {}
+		for cname in chans:
+			keys[cname] = sorted(peaks[cname].keys())
+
+		winwidth = self.Params['LeadCorrelateWindow']
+		for mainkey in chans:
+			correlate[mainkey] = {}
+
+			for k in keys[mainkey]:
+				r = range(k-winwidth, k+winwidth+1)
+				correlate[mainkey][k] = []
+
+				for cname in chans:
+					if cname == mainkey: continue
+
+					correlate[mainkey][k].append( [_ for _ in peaks[cname] if _ in r] )
+
+		return correlate
 
 	def GetKeepKeys(self, chans, peaks):
 		keep_keys = {k:[] for k in peaks.keys()}
@@ -138,10 +162,10 @@ class pyzestyecg:
 			for k in sorted(peaks[cname].keys()):
 				v = peaks[cname][k]
 
-				p = scoreit(params, cname, k, v)
+				p = scoreit(self.Params, cname, k, v)
 				points[cname][k] = p
 
-				if sum(p) >= params['Cutoffs']['Points']:
+				if sum(p) >= self.Params['Cutoffs']['Points']:
 					print([cname, k, k/2000, sum(p), p, 'keep'])
 					keep_keys[cname].append(k)
 				else:
@@ -184,7 +208,7 @@ class pyzestyecg:
 		"""
 		return
 
-	def CalculateRR(self, chans, keep, remove, user, intervals, noise, params):
+	def CalculateRR(self, chans, keep, remove, user, intervals, noise):
 		"""
 		Calculate RR based on the intervals provided.
 		@intervals is a dictionary mapping named regions to a list of (start,stop) frames that are in that named region.
@@ -247,7 +271,7 @@ class pyzestyecg:
 					print("Harmonic")
 					print([last_k, k, mult, list(harmonicrange(last_k, k, mult))])
 					for idx in harmonicrange(last_k, k, mult):
-						findmissingharmonicpeak(peaks, keep, correlate, cname, last_k, k, idx, params, chans)
+						findmissingharmonicpeak(peaks, keep, correlate, cname, last_k, k, idx, self.Params, chans)
 
 				# Update index for next loop
 				last_k = k
