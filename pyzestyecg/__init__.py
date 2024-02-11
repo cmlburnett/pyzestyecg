@@ -772,8 +772,10 @@ def processecg_single(cname, dat, params, ignores, noises):
 	# 14) Update peak potentials with percentiles from (12)
 	# 15) Calculate delta time between potentials
 
+	len_dat = len(dat)
+
 	# 2)
-	dat2 = [dat[i] - dat[i-1] for i in range(1,len(dat))] + [0]
+	dat2 = [dat[i] - dat[i-1] for i in range(1,len_dat)] + [0]
 
 	# 3)
 	h = GenHilbert(params['HilbertLength'])
@@ -781,6 +783,7 @@ def processecg_single(cname, dat, params, ignores, noises):
 
 	# 4)
 	f2 = [math.sqrt(f[i]*f[i] + dat2[i]*dat2[i]) for i in range(0,len(f))]
+	del dat2
 
 	# 5)
 	f3 = ApplyFilter(f2, [1/params['Smoothing1']]*params['Smoothing1'])
@@ -815,12 +818,16 @@ def processecg_single(cname, dat, params, ignores, noises):
 	potentials = {}
 	f6_mean = sum(f6)/len(f6)
 
-	maxes = []
 	widths = list(range(params['WindowWidthMax'],0,-5))
 	for width in widths:
 		# Area based on mean f6 values so this would be the trapezoidal "area" for an average window over f6
 		mean_area = f6_mean*(width-1)*2
 
+		# Trapezoidal area calculation proportional to the sum of y-values (delta x is identical so don't bother)
+		# Ends get summed once, but inner values get summed twice for adjacent trapezoids
+		#trap = [1] + ([2]*(width-2)) + [1]
+
+		cnt = 0
 		for i in range(width, len(f6)-width):
 			# If already recorded for a wider window, skip it
 			if i in potentials: continue
@@ -829,29 +836,32 @@ def processecg_single(cname, dat, params, ignores, noises):
 			pre = f6[i-width:i]
 			post = f6[i:i+width]
 
-			# Trapezoidal area calculation proportional to the sum of y-values (delta x is identical so don't bother)
-			# Ends get summed once, but inner values get summed twice for adjacent trapezoids
-			trap = [1] + ([2]*(width-2)) + [1]
-
 			# Calculate areas
-			pre_area = sum([pre[_]*trap[_] for _ in range(width)])
-			post_area = sum([post[_]*trap[_] for _ in range(width)])
+			pre_area = 2*sum(pre) - pre[0] - pre[-1]
+			#pre_area = sum([pre[_]*trap[_] for _ in range(width)])
+			if pre_area <= 0: continue
+
+			post_area = 2*sum(post) - post[0] - post[-1]
+			#post_area = sum([post[_]*trap[_] for _ in range(width)])
+			if post_area >= 0: continue
+
 			# Calculate ratio and invert so it's positive (ratio should be unity ideally)
 			# then subtract 1 and so ratio is percent away from unity
 			ratio = math.fabs(pre_area / post_area * (-1) - 1)
+			if ratio > params['RatioCutoff']: continue
 
-			# If pre area is negative, absolutely don't count it
-			# If post area is positive, absolutely don't count it
-			# Ratio > X% of unity don't count it (parameter)
-			if pre_area > 0 and post_area < 0 and ratio < params['RatioCutoff']:
-				maxes.append(i)
+			# If reaches this point then all three are true
+			# - If pre area is negative, absolutely don't count it
+			# - If post area is positive, absolutely don't count it
+			# - Ratio > X% of unity don't count it (parameter)
 
-				# Window width that's wider is more supportive of being QRS
-				# Areas that are larger are more supportive of being QRS
-				# Ratio nearest to unity is more supportive of being QRS
-				# sum/mean being large is more supportive of being QRS
-				# sum/meam%max is percentile of highest sum/mean, higher the percentile is more supportive of being QRS
-				potentials[i] = {'window': width, 'pre': pre_area, 'post': post_area, 'sum': pre_area + post_area, 'ratio': pre_area/post_area, 'sum/mean': pre_area/mean_area}
+			# Window width that's wider is more supportive of being QRS
+			# Areas that are larger are more supportive of being QRS
+			# Ratio nearest to unity is more supportive of being QRS
+			# sum/mean being large is more supportive of being QRS
+			# sum/meam%max is percentile of highest sum/mean, higher the percentile is more supportive of being QRS
+			potentials[i] = {'window': width, 'pre': pre_area, 'post': post_area, 'sum': pre_area + post_area, 'ratio': pre_area/post_area, 'sum/mean': pre_area/mean_area}
+			cnt += 1
 
 	# 10B)
 	# Calculate rank of pre-areas and normalize to [0,1]
@@ -875,7 +885,7 @@ def processecg_single(cname, dat, params, ignores, noises):
 		idx_min = int(idx-winwidth/2)
 		idx_max = int(idx+winwidth/2)
 		if idx_min < 0: idx_min = 0
-		if idx_max > len(dat): idx_max = len(dat)
+		if idx_max > len_dat: idx_max = len_dat
 		win = list(map(lambda _:math.fabs(_), dat[idx_min:idx_max]))
 		mx = max(win)
 		idx = win.index(mx) + idx_min
@@ -896,7 +906,7 @@ def processecg_single(cname, dat, params, ignores, noises):
 		idx_min = int(idx-winwidth/2)
 		idx_max = int(idx+winwidth/2)
 		if idx_min < 0: idx_min = 0
-		if idx_max > len(dat): idx_max = len(dat)
+		if idx_max > len_dat: idx_max = len_dat
 		win = list(map(lambda _:math.fabs(_), dat[idx_min:idx_max]))
 		avg = sum(win)/len(win)
 		var = sum([(_-avg)**2 for _ in win])/len(win)
