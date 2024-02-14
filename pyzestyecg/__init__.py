@@ -175,7 +175,7 @@ class pyzestyecg:
 
 	def GetRemoveKeys(self, chans, correlate, points, keep):
 		remove = []
-		for cname,v in keep_keys.items():
+		for cname,v in keep.items():
 			for k in v:
 				# Get correlated indices and current points for this peak
 				corr = correlate[cname][k]
@@ -185,11 +185,11 @@ class pyzestyecg:
 				# Iterate thrugh other leads and check how
 				idx = 0
 				cnt = 0
-				for n in header[1:]:
+				for n in chans:
 					if n == cname: continue
 
 					# Check that any of the peaks correlated for each lead scored enough points to be kept
-					if any([_ for _ in corr[idx] if _ in keep_keys[n]]):
+					if any([_ for _ in corr[idx] if _ in keep[n]]):
 						if cname == 'Lead I' and k == 112925:
 							print(['Correlate lead yes', cname, k, n])
 						cnt += 1
@@ -208,7 +208,7 @@ class pyzestyecg:
 		"""
 		return
 
-	def CalculateRR(self, chans, keep, remove, user, intervals, noise):
+	def CalculateRR(self, chans, peaks, correlate, keep, remove, user, intervals, noise):
 		"""
 		Calculate RR based on the intervals provided.
 		@intervals is a dictionary mapping named regions to a list of (start,stop) frames that are in that named region.
@@ -281,7 +281,7 @@ class pyzestyecg:
 		print(too_soon)
 		for cname in too_soon.keys():
 			for k, last_k, h, mult in too_soon[cname]:
-				keep_keys[cname].remove(k)
+				keep[cname].remove(k)
 
 	def OldCaclulateRR(self):
 
