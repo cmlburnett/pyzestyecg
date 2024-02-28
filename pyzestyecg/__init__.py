@@ -110,7 +110,10 @@ class pyzestyecg:
 		rnoise = [range(_[0],_[1]) for _ in noise]
 
 		# Iterate over the data and put into arrays
+		print(['load', datetime.datetime.utcnow()])
 		for fidx,chans,samps in self.WIFF.recording[1].GetAllFrames():
+			if fidx % 10000 == 0:
+				print(['load', fidx, datetime.datetime.utcnow()])
 			if dat is None:
 				# Avoid doing this every iteration since it doesn't change
 				i = len(chans)
@@ -139,10 +142,12 @@ class pyzestyecg:
 
 		winwidth = self.Params['LeadCorrelateWindow']
 		for mainkey in chans:
+			print(['A', mainkey, datetime.datetime.utcnow()])
 			correlate[mainkey] = {}
 
 			for k in keys[mainkey]:
 				r = range(k-winwidth, k+winwidth+1)
+
 				correlate[mainkey][k] = []
 
 				for cname in chans:
@@ -159,6 +164,7 @@ class pyzestyecg:
 		# 4)
 		# NOTE: This is currently just empirically determined, better if some sort of non-linear model (ie, "AI") were used instead
 		for cname in peaks.keys():
+			print(['A', cname, datetime.datetime.utcnow()])
 			for k in sorted(peaks[cname].keys()):
 				v = peaks[cname][k]
 
@@ -176,6 +182,7 @@ class pyzestyecg:
 	def GetRemoveKeys(self, chans, correlate, points, keep):
 		remove = []
 		for cname,v in keep.items():
+			print(['A', cname, datetime.datetime.utcnow()])
 			for k in v:
 				# Get correlated indices and current points for this peak
 				corr = correlate[cname][k]
@@ -216,33 +223,53 @@ class pyzestyecg:
 		"""
 
 		# 6A)
-		RR = []
-		for cname in keep.keys():
-			RR += [keep[cname][i] - keep[cname][i-1] for i in range(1,len(keep[cname]))]
-		min_RR = min(RR)
-
 		# 6B)
+		print(['A', datetime.datetime.utcnow()])
 		histo = {}
-		for k in RR:
-			if k not in histo: histo[k] = 0
-			histo[k] += 1
+		for cname in keep.keys():
+			print(['A1', datetime.datetime.utcnow(), cname])
+			sub = keep[cname]
+			len_sub = len(sub)
+			print(['len sub', len_sub])
+			for i in range(1,len_sub):
+				if i % 10000 == 0:
+					print(['i', i])
+				rr = sub[i] - sub[i-1]
+				if rr not in histo: histo[rr] = 0
+				histo[rr] += 1
+
+		print(['B', datetime.datetime.utcnow()])
+		min_RR = min(histo.keys())
+		print(['min RR', min_RR])
 
 		# 6C)
 		# The fundamental frequency of a dataset with harmonics necessarily is less than mean of the dataset
 		# (If the dataset contained only a single harmonic then the mean is the fundamental frequency)
 		# So the fundamental frequency is limited to min(histo.keys()) to avg
+		print(['C', datetime.datetime.utcnow()])
 		avg = sum([k*v for k,v in histo.items()])/sum(histo.values())
+		print(['avg', avg])
 
 		# 6D)
 		# Get the average of the first harmonic, this average is likely pretty close
-		z = [_ for _ in RR if _ < int(avg)+1]
-		del RR
-		f0 = sum(z)/len(z)
+		print(['D', datetime.datetime.utcnow()])
+		f0 = 0
+		len_f0 = 0
+		avg2 = int(avg)+1
+		for k,v in histo.items():
+			if k > avg2: continue
+
+			f0 += k*v
+			len_f0 += v
+		f0 /= len_f0
+		print(['f0', f0, len_f0, avg2])
 
 		# 6E)
 		# Now go back through ECG data and find gaps larger than f0, particularly if an integer multiple suggesting missed complexes
-		too_soon = {k:[] for k in header[1:]}
+		print(['E', datetime.datetime.utcnow()])
+		too_soon = {k:[] for k in chans}
 		for cname in keep.keys():
+			print(['E1', cname, datetime.datetime.utcnow()])
 			last_k = None
 			for k in sorted(keep[cname]):
 				# Skip first
@@ -252,7 +279,7 @@ class pyzestyecg:
 
 				h = (k-last_k)/f0
 				mult = round(h)
-				print([cname, k, last_k, k-last_k, h, mult])
+				#print([cname, k, last_k, k-last_k, h, mult])
 
 				if last_k in [_[0] for _ in too_soon[cname]]:
 					print("Don't penalize next peak after Too Soon point")
@@ -278,6 +305,7 @@ class pyzestyecg:
 
 		# 6F)
 		# TODO: for now just remove them
+		print(['F', datetime.datetime.utcnow()])
 		print(too_soon)
 		for cname in too_soon.keys():
 			for k, last_k, h, mult in too_soon[cname]:
@@ -494,6 +522,97 @@ class pyzestyecg:
 		RR = [keep_keys[cname][i] - keep_keys[cname][i-1] for i in range(1,len(keep_keys[cname]))]
 		for r in RR:
 			print(r)
+
+	def ExportPNG(self, peaks, filegenerator, filesaver, width=10, speed=100):
+		"""
+		Export data to PNG files.
+		@filegenerator -- Function that returns an object to write() to, only argument is 
+		@filesaver -- Function that takes the object returned from @filegenerator and saves it
+		@width -- width of image in inches
+		@speed -- speed of ECG (standard 12 lead is 25 mm/sec, default to 100)
+		"""
+
+		# 6 leads so 6 vertical sub plots
+		# FIXME: calculate programmatically
+		len_chans = 6
+
+		fig,axs = plt.subplots(len_chans)
+
+		tstart = self.WIFF.recording[1].frame_table.fidx_start
+		tend = self.WIFF.recording[1].frame_table.fidx_end
+
+		# Total time delta across all leads
+		delta = tend - tstart
+
+		# Get sampling rate
+		freq = self.WIFF.recording[1].sampling
+
+		# Calculate samples per page with 25.4 mm = 1 inch
+		# samps = (in * 25.4 mm/in) / (mm/sec) * (samples/sec)
+		samps = (width * 25.4) / speed * freq
+
+		# Truncate to whole sample to step
+		step = int(samps)
+		r = range(0, delta, step)
+
+		for i in range(0,6):
+			axs[i].get_xaxis().set_visible(False)
+		axs[-1].get_xaxis().set_visible(True)
+
+		print(['PNG', (tstart, tend), delta, freq, samps, step, r, len(r)])
+		for idx,fidx in enumerate(r):
+			if idx < 713: continue
+
+			print(['page', datetime.datetime.utcnow(), (idx, len(r))])
+			# idx -- File index
+			# fidx -- Frame index (start) of the section to be saved to a PNG
+
+			s = slice(fidx, fidx+step)
+			rseg = range(fidx, fidx+step)
+
+			# Get data for this image section
+			d = []
+			chans = None
+			for fidxstart,chans,dat in self.WIFF.recording[1].GetSliceFrames(s):
+				d.append(dat)
+
+			# Iterate over each lead in the time slice
+			for i in range(0,len(d[0])):
+				cname = chans[i]
+
+				# Clear the subfigure
+				axs[i].cla()
+
+				# Apply lead label to the y axis
+				axs[i].set_ylabel(cname)
+
+				# pull out the column of data to plot
+				subd = [_[i] for _ in d]
+				axs[i].plot(list(map(lambda _:(_+idx*step)/freq, range(0, len(d)))), subd)
+
+				# Filter out the peaks data for the time slice
+				match_points = [_ for _ in peaks[cname] if _ in rseg]
+
+				# Plot as red circles ("ro") on top of the ECG data
+				print([len(subd), match_points, fidx])
+				print([_-fidx for _ in match_points])
+				axs[i].plot([_/freq for _ in match_points], [subd[_-fidx] for _ in match_points], 'ro')
+
+			# Labels
+			plt.xlabel("Time (sec)")
+			axs[-1].xaxis.set_major_locator(matplotlib.ticker.MultipleLocator(0.1))
+			axs[-1].xaxis.set_major_formatter('{x:.1f}')
+			axs[-1].xaxis.set_minor_locator(matplotlib.ticker.MultipleLocator(0.025))
+
+			# Format figure size
+			fig.set_figwidth(width)
+			fig.set_figheight(12)
+
+			with filegenerator(idx) as f:
+				plt.savefig(f, format='png', bbox_inches='tight')
+
+				f.seek(0)
+				filesaver(idx, f)
 
 def findmissingharmonicpeak(peaks, keep_keys, correlate, cname, last_k, k, idx, params, header):
 	"""
@@ -797,28 +916,34 @@ def processecg_single(cname, dat, params, ignores, noises):
 	# 15) Calculate delta time between potentials
 
 	len_dat = len(dat)
+	print(['process', cname, len_dat, datetime.datetime.utcnow()])
 
 	# 2)
 	dat2 = [dat[i] - dat[i-1] for i in range(1,len_dat)] + [0]
 
 	# 3)
+	print(['A', cname, datetime.datetime.utcnow()])
 	h = GenHilbert(params['HilbertLength'])
 	f = list(ApplyFilter(dat2, h))
 
 	# 4)
+	print(['B', cname, datetime.datetime.utcnow()])
 	f2 = [math.sqrt(f[i]*f[i] + dat2[i]*dat2[i]) for i in range(0,len(f))]
 	del dat2
 
 	# 5)
+	print(['C', cname, datetime.datetime.utcnow()])
 	f3 = ApplyFilter(f2, [1/params['Smoothing1']]*params['Smoothing1'])
 
 	# 6)
+	print(['D', cname, datetime.datetime.utcnow()])
 	f3_min = min(f3)
 	f3 = [_ - f3_min for _ in f3]
 	f3_max = max(f3)
 	f3 = [_ / f3_max for _ in f3]
 
 	# 7)
+	print(['E', cname, datetime.datetime.utcnow()])
 	f4 = []
 	for i in range(len(f3)):
 		# Push towards zero or one to make more of a black/white selector
@@ -828,6 +953,7 @@ def processecg_single(cname, dat, params, ignores, noises):
 			f4.append( (1-f3[i])*(1-f3[i])*math.fabs(dat[i]) )
 
 	# 8)
+	print(['F', cname, datetime.datetime.utcnow()])
 	ones = [1] * params['Smoothing2']
 	len_ones = len(ones)
 	f5 = [0] * (len(f4) - len_ones)
@@ -835,15 +961,18 @@ def processecg_single(cname, dat, params, ignores, noises):
 		f5[i] = sum(f4[i-len_ones:i]) / len_ones
 
 	# 9)
+	print(['G', cname, datetime.datetime.utcnow()])
 	f6 = [f5[i+1] - f5[i] for i in range(len(f5)-1)]
 	f6.append(0)
 
 	# 10A)
+	print(['H', cname, datetime.datetime.utcnow()])
 	potentials = {}
 	f6_mean = sum(f6)/len(f6)
 
 	widths = list(range(params['WindowWidthMax'],0,-5))
 	for width in widths:
+		print(['I', cname, datetime.datetime.utcnow(), width])
 		# Area based on mean f6 values so this would be the trapezoidal "area" for an average window over f6
 		mean_area = f6_mean*(width-1)*2
 
@@ -886,6 +1015,7 @@ def processecg_single(cname, dat, params, ignores, noises):
 			# sum/meam%max is percentile of highest sum/mean, higher the percentile is more supportive of being QRS
 			potentials[i] = {'window': width, 'pre': pre_area, 'post': post_area, 'sum': pre_area + post_area, 'ratio': pre_area/post_area, 'sum/mean': pre_area/mean_area}
 			cnt += 1
+		print(['I', cname, datetime.datetime.utcnow(), width, cnt])
 
 	# 10B)
 	# Calculate rank of pre-areas and normalize to [0,1]
@@ -905,11 +1035,13 @@ def processecg_single(cname, dat, params, ignores, noises):
 
 	# 10C)
 	# Calculate percentile of maximum sum/mean values
+	print(['K', cname, datetime.datetime.utcnow()])
 	max_summean = max([_['sum/mean'] for _ in potentials.values()])
 	for k in potentials.keys():
 		potentials[k]['sum/mean%max'] = potentials[k]['sum/mean'] / max_summean
 
 	# 11)
+	print(['L', cname, datetime.datetime.utcnow()])
 	winwidth = params['MaximumWindowWidth']
 	maximums = {}
 	for k in sorted(potentials.keys()):
@@ -928,6 +1060,7 @@ def processecg_single(cname, dat, params, ignores, noises):
 		maximums[idx] += 1
 
 	# 12)
+	print(['M', cname, datetime.datetime.utcnow()])
 	maximums_histo = {}
 	variances = {}
 	for k,v in maximums.items():
@@ -946,6 +1079,7 @@ def processecg_single(cname, dat, params, ignores, noises):
 		variances[idx] = var
 
 	# 13)
+	print(['N', cname, datetime.datetime.utcnow()])
 	maximums_N = len(maximums.keys())
 	maximums_p = {}
 	maximums_pdf = {}
@@ -957,6 +1091,7 @@ def processecg_single(cname, dat, params, ignores, noises):
 		maximums_pdf[k] = running_sum
 
 	# 14)
+	print(['O', cname, datetime.datetime.utcnow()])
 	for k in potentials.keys():
 		# 'idx' is the index into @dat that is the local maximum for potential index of @k into @f6
 		peak_N = maximums[ potentials[k]['Maximum']['idx'] ]
@@ -964,10 +1099,14 @@ def processecg_single(cname, dat, params, ignores, noises):
 		potentials[k]['Maximum']['Percentile'] = maximums_pdf[peak_N]
 		# A wider potential set in @potentials that point to the same peak in @dat is supportive of being QRS
 
+	print(['P', cname, datetime.datetime.utcnow()])
 	peaks = {}
 	for k in sorted(potentials.keys()):
 		v = potentials[k]
 		idx = potentials[k]['Maximum']['idx']
+
+		if idx > 1813999:
+			raise ValueError("Exceeded frame maximum 1813999: %d from %d" % (idx, k))
 
 		potentials[k]['ignored'] = False
 		potentials[k]['noisy'] = False
@@ -995,6 +1134,7 @@ def processecg_single(cname, dat, params, ignores, noises):
 		peaks[idx]['sum/mean%max'].append( v['sum/mean%max'] )
 
 	# 15)
+	print(['Q', cname, datetime.datetime.utcnow()])
 	last = 0
 	for k in sorted(potentials.keys()):
 		potentials[k]['deltaT'] = k - last
@@ -1038,5 +1178,6 @@ def processecg_single(cname, dat, params, ignores, noises):
 		fig.set_figheight(20)
 		plt.savefig('snippet.png', bbox_inches='tight')
 
+	print(['R', cname, datetime.datetime.utcnow(), len(potentials), len(peaks)])
 	return potentials, peaks
 
