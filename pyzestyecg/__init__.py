@@ -1012,11 +1012,15 @@ def processecg_single(cname, dat, params, ignores, noises):
 	# 4)
 	print(['B', cname, datetime.datetime.utcnow()])
 	f2 = [math.sqrt(f[i]*f[i] + dat2[i]*dat2[i]) for i in range(0,len(f))]
+	# Delete, no longer needed
 	del dat2
 
 	# 5)
 	print(['C', cname, datetime.datetime.utcnow()])
 	f3 = ApplyFilter(f2, [1/params['Smoothing1']]*params['Smoothing1'])
+	# Delete, no longer needed
+	len_f2 = len(f2)
+	del f2
 
 	# 6)
 	print(['D', cname, datetime.datetime.utcnow()])
@@ -1034,6 +1038,9 @@ def processecg_single(cname, dat, params, ignores, noises):
 			f4.append( f3[i]*f3[i]*math.fabs(dat[i]) )
 		else:
 			f4.append( (1-f3[i])*(1-f3[i])*math.fabs(dat[i]) )
+	# Delete, no longer needed
+	len_f3 = len(f3)
+	del f3
 
 	# 8)
 	print(['F', cname, datetime.datetime.utcnow()])
@@ -1042,11 +1049,18 @@ def processecg_single(cname, dat, params, ignores, noises):
 	f5 = [0] * (len(f4) - len_ones)
 	for i in range(len(f5)):
 		f5[i] = sum(f4[i-len_ones:i]) / len_ones
+	# Delete, no longer needed
+	len_f4 = len(f4)
+	del f4
 
 	# 9)
 	print(['G', cname, datetime.datetime.utcnow()])
 	f6 = [f5[i+1] - f5[i] for i in range(len(f5)-1)]
 	f6.append(0)
+	# Delete, no longer needed
+	len_f5 = len(f5)
+	del f5
+	len_f6 = len(f6)
 
 	# 10A)
 	print(['H', cname, datetime.datetime.utcnow()])
@@ -1064,21 +1078,19 @@ def processecg_single(cname, dat, params, ignores, noises):
 		#trap = [1] + ([2]*(width-2)) + [1]
 
 		cnt = 0
-		for i in range(width, len(f6)-width):
+		for i in range(width, len_f6-width):
 			# If already recorded for a wider window, skip it
 			if i in potentials: continue
+			# Window spilling over end of list, so stop
+			if i > len_f6: continue
 
 			# Get pre-window and post-window from the point f6[i] (zero crossing should have pre > 0 and post < 0)
 			pre = f6[i-width:i]
-			post = f6[i:i+width]
-
-			# Calculate areas
 			pre_area = 2*sum(pre) - pre[0] - pre[-1]
-			#pre_area = sum([pre[_]*trap[_] for _ in range(width)])
 			if pre_area <= 0: continue
 
+			post = f6[i:i+width]
 			post_area = 2*sum(post) - post[0] - post[-1]
-			#post_area = sum([post[_]*trap[_] for _ in range(width)])
 			if post_area >= 0: continue
 
 			# Calculate ratio and invert so it's positive (ratio should be unity ideally)
@@ -1099,6 +1111,8 @@ def processecg_single(cname, dat, params, ignores, noises):
 			potentials[i] = {'window': width, 'pre': pre_area, 'post': post_area, 'sum': pre_area + post_area, 'ratio': pre_area/post_area, 'sum/mean': pre_area/mean_area}
 			cnt += 1
 		print(['I', cname, datetime.datetime.utcnow(), width, cnt])
+	# Delete, no longer needed
+	del f6
 
 	# 10B)
 	# Calculate rank of pre-areas and normalize to [0,1]
@@ -1187,9 +1201,6 @@ def processecg_single(cname, dat, params, ignores, noises):
 	for k in sorted(potentials.keys()):
 		v = potentials[k]
 		idx = potentials[k]['Maximum']['idx']
-
-		if idx > 1813999:
-			raise ValueError("Exceeded frame maximum 1813999: %d from %d" % (idx, k))
 
 		potentials[k]['ignored'] = False
 		potentials[k]['noisy'] = False
