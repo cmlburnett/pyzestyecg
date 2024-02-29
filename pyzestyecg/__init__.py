@@ -49,6 +49,89 @@ def ApplyFilter(x, b):
 	ret = scipy.signal.filtfilt(np.array(b), np.array([1]), np.array(x))
 	return ret
 
+def binarysearchlist(lst, r):
+	"""
+	Quickly search list @lst for an item within the range @r.
+	Returns the index of the matched item.
+	"""
+
+	# Nonthing to find
+	if len(lst) == 0:
+		return None
+
+	a = 0
+	b = len(lst)-1
+	for cnt in range(100):
+		# Not found in the list
+		if a == b:
+			return None
+
+		# Just finish with a linear search
+		if b-a < 25:
+			for i in range(a,b+1):
+				if lst[i] in r:
+					return i
+			else:
+				# Not found
+				return None
+
+		# Look half way
+		idx = round( (b-a)/2+a )
+		x = lst[idx]
+
+		# Found an end point, stop here
+		if x in r:
+			return idx
+
+		# Reaching this point means that x in not in the range, so must be higher or lower
+		if x < r.start:
+			# Search upper half
+			a = idx
+		else:
+			# Search lower half
+			b = idx
+
+	else:
+		# Avoid infinite loops
+		cnt += 1
+		if cnt > 100:
+			raise NotImplementedError("Loop took too long: len(lst)=%d, a=%d, b=%d, r=%s, idx=%d, x=%d" % (len(lst), a, b, r, idx, x))
+
+def findinrange(lst, r):
+	"""
+	Find all items in list @lst within range @r.
+	Assumes @r is sorted so a binary search can be done for performance reasons.
+	Returns empty list if no items around found
+	"""
+
+	start = binarysearchlist(lst, r)
+
+	# No items found in range
+	if start is None:
+		return []
+
+	# Start with found indexed item
+	ret = [lst[start]]
+
+	# Step down until start of the range
+	for i in range(start-1, -1, -1):
+		v = lst[i]
+		if v >= r.start:
+			ret.insert(0, v)
+		else:
+			break
+
+	# Step up until end of the range
+	len_lst = len(lst)
+	for i in range(start, len_lst):
+		v = lst[i]
+		if v <= r.stop:
+			ret.append(v)
+		else:
+			break
+
+	return ret
+
 class pyzestyecg:
 	def __init__(self, wiff, params=None):
 		default = __class__.GetDefaultParams()
@@ -132,7 +215,7 @@ class pyzestyecg:
 
 	def GetCorrelate(self, chans, potentials, peaks):
 		"""
-		Correlated peaks across leads (they don't always happen at the same time index.
+		Correlated peaks across leads (they don't always happen at the same time index).
 		"""
 
 		keys = {}
@@ -153,7 +236,7 @@ class pyzestyecg:
 				for cname in chans:
 					if cname == mainkey: continue
 
-					correlate[mainkey][k].append( [_ for _ in peaks[cname] if _ in r] )
+					correlate[mainkey][k].append( findinrange(keys[cname], r) )
 
 		return correlate
 
