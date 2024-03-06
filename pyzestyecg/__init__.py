@@ -280,8 +280,6 @@ class pyzestyecg:
 
 					# Check that any of the peaks correlated for each lead scored enough points to be kept
 					if any([_ for _ in corr[idx] if _ in keep[n]]):
-						if cname == 'Lead I' and k == 112925:
-							print(['Correlate lead yes', cname, k, n])
 						cnt += 1
 
 					idx += 1
