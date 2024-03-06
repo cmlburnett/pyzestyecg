@@ -200,7 +200,7 @@ class pyzestyecg:
 			if dat is None:
 				# Avoid doing this every iteration since it doesn't change
 				i = len(chans)
-				dat = [[]] * i
+				dat = [[] for _ in range(i)]
 				potentials = {_:[] for _ in chans}
 				peaks = {_:[] for _ in chans}
 
