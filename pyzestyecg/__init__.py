@@ -786,12 +786,8 @@ def scoreit(params, cname, k, v):
 		p.append(0)
 	elif len(v['preRank']) == 5:
 		p.append(1)
-	elif len(v['preRank']) >= 6 and len(v['preRank']) <= 10:
-		p.append(1)
-	elif len(v['preRank']) > 10:
-		p.append(20)
 	else:
-		p.append(0)
+		p.append( len(v['preRank']) - 5 )
 
 	if len(v['sum/mean%max']) <= 3:
 		p.append(-100)
@@ -799,12 +795,8 @@ def scoreit(params, cname, k, v):
 		p.append(0)
 	elif len(v['sum/mean%max']) == 5:
 		p.append(1)
-	elif len(v['sum/mean%max']) >= 6 and len(v['sum/mean%max']) <= 10:
-		p.append(1)
-	elif len(v['sum/mean%max']) > 10:
-		p.append(20)
 	else:
-		p.append(0)
+		p.append( len(v['sum/mean%max']) - 5 )
 
 	if sum(v['preRank'])/len(v['preRank']) > 0.45:
 		p.append(2)
