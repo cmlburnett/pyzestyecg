@@ -148,11 +148,11 @@ class pyzestyecg:
 	def GetDefaultParams():
 		return {
 			'HilbertLength': 49,
-			'Smoothing1': 10,
+			'Smoothing1': 40,
 			'Smoothing2': 20,
-			'WindowWidthMax': 50,
-			'MaximumWindowWidth': 40,
-			'RatioCutoff': 0.02,
+			'WindowWidthMax': 35,
+			'MaximumWindowWidth': 60,
+			'RatioCutoff': 0.05,
 			'Cutoffs': {
 				'varPercentile': {
 					'minimum': (1000.0, -100),
@@ -195,8 +195,6 @@ class pyzestyecg:
 		# Iterate over the data and put into arrays
 		print(['load', datetime.datetime.utcnow()])
 		for fidx,chans,samps in self.WIFF.recording[1].GetAllFrames():
-			if fidx % 10000 == 0:
-				print(['load', fidx, datetime.datetime.utcnow()])
 			if dat is None:
 				# Avoid doing this every iteration since it doesn't change
 				i = len(chans)
@@ -255,10 +253,11 @@ class pyzestyecg:
 				points[cname][k] = p
 
 				if sum(p) >= self.Params['Cutoffs']['Points']:
-					print([cname, k, k/2000, sum(p), p, 'keep'])
+					#print([cname, k, k/2000, sum(p), p, 'keep'])
 					keep_keys[cname].append(k)
 				else:
-					print([cname, k, k/2000, sum(p), p, 'pass'])
+					#print([cname, k, k/2000, sum(p), p, 'pass'])
+					pass
 
 		return (points, keep_keys)
 
@@ -294,14 +293,23 @@ class pyzestyecg:
 		"""
 		Check that the user list of points @user is valid.
 		"""
-		return
 
-	def CalculateRR(self, chans, peaks, correlate, keep, remove, user, intervals, noise):
+		for cname in keep.keys():
+			user['Keep'][cname] = []
+			user['Remove'][cname] = []
+
+	def CalculateRR(self, chans, peaks, correlate, keep, remove, user, final, intervals, noise):
 		"""
 		Calculate RR based on the intervals provided.
 		@intervals is a dictionary mapping named regions to a list of (start,stop) frames that are in that named region.
 		@noise is a list of (start,stop) regions that are ignored from analysis as user indicates it is noise.
 		"""
+
+		# Final list of peaks
+		#  Those in @keep are kept
+		#  Unless in @remove or @user['Remove']
+		#  Add [back in] any points in @user['Keep']
+		final = {}
 
 		# 6A)
 		# 6B)
@@ -309,7 +317,22 @@ class pyzestyecg:
 		histo = {}
 		for cname in keep.keys():
 			print(['A1', datetime.datetime.utcnow(), cname])
-			sub = keep[cname]
+
+			sub = []
+			for v in keep[cname]:
+				if (cname,v) in remove:
+					pass
+				elif v in user['Remove'][cname]:
+					pass
+				else:
+					sub.append(v)
+
+			sub += user['Keep'][cname]
+			sub = list(set(sub))
+			sub.sort()
+			# Store final list
+			final[cname] = sub
+
 			len_sub = len(sub)
 			print(['len sub', len_sub])
 			for i in range(1,len_sub):
@@ -349,10 +372,10 @@ class pyzestyecg:
 		# Now go back through ECG data and find gaps larger than f0, particularly if an integer multiple suggesting missed complexes
 		print(['E', datetime.datetime.utcnow()])
 		too_soon = {k:[] for k in chans}
-		for cname in keep.keys():
+		for cname in final.keys():
 			print(['E1', cname, datetime.datetime.utcnow()])
 			last_k = None
-			for k in sorted(keep[cname]):
+			for k in sorted(final[cname]):
 				# Skip first
 				if last_k is None:
 					last_k = k
@@ -379,7 +402,7 @@ class pyzestyecg:
 					print("Harmonic")
 					print([last_k, k, mult, list(harmonicrange(last_k, k, mult))])
 					for idx in harmonicrange(last_k, k, mult):
-						findmissingharmonicpeak(peaks, keep, correlate, cname, last_k, k, idx, self.Params, chans)
+						findmissingharmonicpeak(peaks, final, correlate, cname, last_k, k, idx, self.Params, chans)
 
 				# Update index for next loop
 				last_k = k
@@ -642,9 +665,7 @@ class pyzestyecg:
 
 		print(['PNG', (tstart, tend), delta, freq, samps, step, r, len(r)])
 		for idx,fidx in enumerate(r):
-			if idx < 713: continue
-
-			print(['page', datetime.datetime.utcnow(), (idx, len(r))])
+			print(['page', datetime.datetime.utcnow(), (idx, len(r)), (fidx, tend, tend-fidx)])
 			# idx -- File index
 			# fidx -- Frame index (start) of the section to be saved to a PNG
 
@@ -1119,6 +1140,9 @@ def processecg_single(cname, dat, params, ignores, noises):
 	# Sort by pre area
 	preareas = []
 	for k,v in potentials.items():
+		# Skip those ignored or noise
+		if v['ignored'] or v['noisy']: continue
+
 		preareas.append( (k, v['pre']) )
 	preareas.sort(key=lambda _:_[1])
 	preareas_len = len(preareas)
@@ -1133,6 +1157,9 @@ def processecg_single(cname, dat, params, ignores, noises):
 	print(['K', cname, datetime.datetime.utcnow()])
 	max_summean = max([_['sum/mean'] for _ in potentials.values()])
 	for k in potentials.keys():
+		# Skip those ignored or noise
+		if potentials[k]['ignored'] or potentials[k]['noisy']: continue
+
 		potentials[k]['sum/mean%max'] = potentials[k]['sum/mean'] / max_summean
 
 	# 11)
@@ -1141,12 +1168,19 @@ def processecg_single(cname, dat, params, ignores, noises):
 	maximums = {}
 	for k in sorted(potentials.keys()):
 		v = potentials[k]
-		idx = k - params['Smoothing2'] - params['Smoothing1']
+
+		# Skip those ignored or noise
+		if v['ignored'] or v['noisy']: continue
+
+		#idx = k - params['Smoothing2'] - params['Smoothing1']
+		idx = k - round(params['Smoothing2']/2)
 		idx_min = int(idx-winwidth/2)
 		idx_max = int(idx+winwidth/2)
 		if idx_min < 0: idx_min = 0
 		if idx_max > len_dat: idx_max = len_dat
-		win = list(map(lambda _:math.fabs(_), dat[idx_min:idx_max]))
+		z = dat[idx_min:idx_max]
+		avg = sum(z)/len(z)
+		win = list(map(lambda _:math.fabs(_-avg), z))
 		mx = max(win)
 		idx = win.index(mx) + idx_min
 		v['Maximum'] = {'idx': idx, 'value': mx}
@@ -1188,6 +1222,9 @@ def processecg_single(cname, dat, params, ignores, noises):
 	# 14)
 	print(['O', cname, datetime.datetime.utcnow()])
 	for k in potentials.keys():
+		# Skip those ignored or noise
+		if potentials[k]['ignored'] or potentials[k]['noisy']: continue
+
 		# 'idx' is the index into @dat that is the local maximum for potential index of @k into @f6
 		peak_N = maximums[ potentials[k]['Maximum']['idx'] ]
 		# Thus, @peak_N is the number of times that @dat index showed up, so find it's percentile
@@ -1198,20 +1235,11 @@ def processecg_single(cname, dat, params, ignores, noises):
 	peaks = {}
 	for k in sorted(potentials.keys()):
 		v = potentials[k]
+
+		# Skip those ignored or noise
+		if v['ignored'] or v['noisy']: continue
+
 		idx = potentials[k]['Maximum']['idx']
-
-		potentials[k]['ignored'] = False
-		potentials[k]['noisy'] = False
-
-		# Instructed to ignore it
-		if any([idx in _ for _ in ignores]):
-			potentials[k]['ignored'] = True
-			continue
-		if any([idx in _ for _ in noises]):
-			potentials[k]['noisy'] = True
-			continue
-
-		# Not ignored or in band of noise
 
 		if idx not in peaks:
 			var = variances[idx]
