@@ -1079,34 +1079,38 @@ def processecg_single(cname, dat, params, ignores, noises):
 	f6_mean = sum(f6)/len(f6)
 
 	widths = list(range(params['WindowWidthMax'],0,-5))
+	# Calculate areas onces per wdith
+	areas = {}
 	for width in widths:
-		print(['I', cname, datetime.datetime.utcnow(), width])
-		# Area based on mean f6 values so this would be the trapezoidal "area" for an average window over f6
-		mean_area = f6_mean*(width-1)*2
+		areas[width] = f6_mean*(width-1)*2
 
-		# Trapezoidal area calculation proportional to the sum of y-values (delta x is identical so don't bother)
-		# Ends get summed once, but inner values get summed twice for adjacent trapezoids
-		#trap = [1] + ([2]*(width-2)) + [1]
+	max_width = max(widths)
 
-		cnt = 0
-		for i in range(width, len_f6-width):
-			# If already recorded for a wider window, skip it
-			if i in potentials: continue
-			# Window spilling over end of list, so stop
-			if i > len_f6: continue
+	print(['I', cname, datetime.datetime.utcnow(), widths])
+	for i in range(max_width, len_f6-max_width):
+		# Extract the range once and pull portions of this for smaller widths
+		pre_full = f6[i-max_width:i]
+		post_full = f6[i:i+max_width]
+
+		for width in widths:
+			mean_area = areas[width]
+
+			# Trapezoidal area calculation proportional to the sum of y-values (delta x is identical so don't bother)
+			# Ends get summed once, but inner values get summed twice for adjacent trapezoids
+			#trap = [1] + ([2]*(width-2)) + [1]
 
 			# Get pre-window and post-window from the point f6[i] (zero crossing should have pre > 0 and post < 0)
-			pre = f6[i-width:i]
+			pre = pre_full[-width:]
 			pre_area = 2*sum(pre) - pre[0] - pre[-1]
-			if pre_area <= 0: continue
+			if pre_area <= 0.02: continue
 
-			post = f6[i:i+width]
+			post = post_full[:width]
 			post_area = 2*sum(post) - post[0] - post[-1]
-			if post_area >= 0: continue
+			if post_area >= -0.02: continue
 
 			# Calculate ratio and invert so it's positive (ratio should be unity ideally)
 			# then subtract 1 and so ratio is percent away from unity
-			ratio = math.fabs(pre_area / post_area * (-1) - 1)
+			ratio = math.fabs( ((pre_area / post_area)*(-1)) - 1)
 			if ratio > params['RatioCutoff']: continue
 
 			# If reaches this point then all three are true
