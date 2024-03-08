@@ -1046,9 +1046,9 @@ def processecg_single(cname, dat, params, ignores, noises):
 	for i in range(len(f3)):
 		# Push towards zero or one to make more of a black/white selector
 		if f3[i] < 0.5:
-			f4.append( f3[i]*f3[i]*math.fabs(dat[i]) )
+			f4.append( f3[i]*f3[i]*f3[i] )
 		else:
-			f4.append( (1-f3[i])*(1-f3[i])*math.fabs(dat[i]) )
+			f4.append( 1-((1-f3[i])*(1-f3[i])*(1-f3[i])) )
 	# Delete, no longer needed
 	len_f3 = len(f3)
 	del f3
