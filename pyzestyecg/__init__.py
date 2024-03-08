@@ -348,8 +348,6 @@ class pyzestyecg:
 			print("%20s %s" % (str(k), histo[k]))
 
 		print(['B', datetime.datetime.utcnow()])
-		min_RR = min(histo.keys())
-		print(['min RR', min_RR])
 
 		# 6C)
 		# The fundamental frequency of a dataset with harmonics necessarily is less than mean of the dataset
