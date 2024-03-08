@@ -1010,6 +1010,7 @@ def processecg_single(cname, dat, params, ignores, noises):
 	# 15) Calculate delta time between potentials
 
 	len_dat = len(dat)
+	min_dat = min(dat)
 	print(['process', cname, len_dat, datetime.datetime.utcnow()])
 
 	# 2)
@@ -1260,8 +1261,8 @@ def processecg_single(cname, dat, params, ignores, noises):
 		last = k
 
 	if False:
-		i_start = 4060
-		i_end = 4060*2
+		i_start = 30000
+		i_end = 31000
 		r = range(i_start, i_end)
 
 		pskeys = [_ for _ in peaks.keys() if _ in r]
@@ -1295,7 +1296,7 @@ def processecg_single(cname, dat, params, ignores, noises):
 
 		fig.set_figwidth(20)
 		fig.set_figheight(20)
-		plt.savefig('snippet.png', bbox_inches='tight')
+		plt.savefig('snippet-%s.png' % cname, bbox_inches='tight')
 
 	print(['R', cname, datetime.datetime.utcnow(), len(potentials), len(peaks)])
 	return potentials, peaks
