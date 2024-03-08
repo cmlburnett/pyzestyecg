@@ -1123,9 +1123,12 @@ def processecg_single(cname, dat, params, ignores, noises):
 			# Ratio nearest to unity is more supportive of being QRS
 			# sum/mean being large is more supportive of being QRS
 			# sum/meam%max is percentile of highest sum/mean, higher the percentile is more supportive of being QRS
-			potentials[i] = {'window': width, 'pre': pre_area, 'post': post_area, 'sum': pre_area + post_area, 'ratio': pre_area/post_area, 'sum/mean': pre_area/mean_area}
-			cnt += 1
-		print(['I', cname, datetime.datetime.utcnow(), width, cnt])
+			potentials[i] = {'window': width, 'pre': pre_area, 'post': post_area, 'sum': pre_area + post_area, 'ratio': ratio, 'sum/mean': pre_area/mean_area}
+
+			potentials[i]['ignored'] = any([i in _ for _ in ignores])
+			potentials[i]['noisy'] = ([i in _ for _ in noises])
+			break
+
 	# Delete, no longer needed
 	del f6
 
