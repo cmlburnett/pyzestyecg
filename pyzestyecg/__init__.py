@@ -341,6 +341,11 @@ class pyzestyecg:
 				rr = sub[i] - sub[i-1]
 				if rr not in histo: histo[rr] = 0
 				histo[rr] += 1
+				print("%20s %d" % (cname, rr))
+
+		print("----------------------")
+		for k in sorted(histo.keys()):
+			print("%20s %s" % (str(k), histo[k]))
 
 		print(['B', datetime.datetime.utcnow()])
 		min_RR = min(histo.keys())
@@ -413,219 +418,9 @@ class pyzestyecg:
 		print(too_soon)
 		for cname in too_soon.keys():
 			for k, last_k, h, mult in too_soon[cname]:
-				keep[cname].remove(k)
+				final[cname].remove(k)
 
-	def OldCaclulateRR(self):
-
-		# Things to do:
-		#  1) Read in data
-		#  2) Correlate peaks against peaks in other leads within params['LeadCorrelateWindow'] window
-		#  3) Index list of keys (indices) to keep, which is keyed off of the lead name
-		#     Also keep a similar list of point scores for each criteria for each peak
-		#  4) Iterate through all peaks and filter some out based on paramters
-		#  5) Remove peaks based on lake of correlation with other leads
-		#  6) Fill in gaps using RR intervals and concept of harmonics
-		#     6A) Calculate RR intervals
-		#     6B) Calculate histogram of RR intervals
-		#     6C) Average of histogram should be greater (or equal to) fundamental harmonic
-		#     6D) Truncate histogram to (6C) average is assumed to be close to fundamental RR interval
-		#     6E) Find integer gaps and fill them in if able
-		#     6F) If a peak is non-harmonic then assume it's a P wave or PVC or something and just ignore it
-		# 7) Export to PNG
-		# 8) Calculate R-R intervals
-
-		# 1)
-		fname_dat = self.Filename + '.pypickle'
-		if self.CacheExists():
-			z = self.CacheRead()
-			header = z['header']
-			potentials = z['potentials']
-			peaks = z['peaks']
-			header, dat = loadecg(fname)
-
-		else:
-			# Process the ECG data to get peak information
-			# peaks is indexed by column name
-			header, dat, potentials, peaks = processecg(fname, params)
-
-			self.CacheWrite({'header': header, 'potentials': potentials, 'peaks': peaks})
-
-		# 2)
-		correlate = correlateleads(header, potentials, peaks, params)
-
-		# Print out all peaks for debugging
-		if False:
-			for cname in peaks.keys():
-				for k in sorted(peaks[cname]):
-					print([cname, k, peaks[cname][k]])
-
-		# 3)
-		keep_keys = {k:[] for k in peaks.keys()}
-		points = {k:{} for k in peaks.keys()}
-
-		# 4)
-		# NOTE: This is currently just empirically determined, better if some sort of non-linear model (ie, "AI") were used instead
-		for cname in peaks.keys():
-			for k in sorted(peaks[cname].keys()):
-				v = peaks[cname][k]
-
-				p = scoreit(params, cname, k, v)
-				points[cname][k] = p
-
-				if sum(p) >= params['Cutoffs']['Points']:
-					print([cname, k, k/2000, sum(p), p, 'keep'])
-					keep_keys[cname].append(k)
-				else:
-					print([cname, k, k/2000, sum(p), p, 'pass'])
-
-		# 5)
-		remove = []
-		for cname,v in keep_keys.items():
-			for k in v:
-				# Get correlated indices and current points for this peak
-				corr = correlate[cname][k]
-				corr_len = [len(_) > 0 for _ in corr].count(True)
-				p = points[cname][k]
-
-				# Iterate thrugh other leads and check how
-				idx = 0
-				cnt = 0
-				for n in header[1:]:
-					if n == cname: continue
-
-					# Check that any of the peaks correlated for each lead scored enough points to be kept
-					if any([_ for _ in corr[idx] if _ in keep_keys[n]]):
-						if cname == 'Lead I' and k == 112925:
-							print(['Correlate lead yes', cname, k, n])
-						cnt += 1
-
-					idx += 1
-
-				# This peak only matches 0-2 other leads, probably not enough to be a QRS so get rid of it
-				if cnt < 3:
-					remove.append( (cname,k) )
-
-				if cname == 'Lead I' and k == 112925:
-					print(['corr', corr, corr_len, p, cnt])
-					print([(cname, k), n, cnt, 'remove'])
-
-		# Remove them
-		for cname,k in remove:
-			keep_keys[cname].remove(k)
-
-		# 6A)
-		RR = []
-		for cname in keep_keys.keys():
-			RR += [keep_keys[cname][i] - keep_keys[cname][i-1] for i in range(1,len(keep_keys[cname]))]
-		min_RR = min(RR)
-
-		# 6B)
-		histo = {}
-		for k in RR:
-			if k not in histo: histo[k] = 0
-			histo[k] += 1
-
-		# 6C)
-		# The fundamental frequency of a dataset with harmonics necessarily is less than mean of the dataset
-		# (If the dataset contained only a single harmonic then the mean is the fundamental frequency)
-		# So the fundamental frequency is limited to min(histo.keys()) to avg
-		avg = sum([k*v for k,v in histo.items()])/sum(histo.values())
-
-		# 6D)
-		# Get the average of the first harmonic, this average is likely pretty close
-		z = [_ for _ in RR if _ < int(avg)+1]
-		del RR
-		f0 = sum(z)/len(z)
-
-		# 6E)
-		# Now go back through ECG data and find gaps larger than f0, particularly if an integer multiple suggesting missed complexes
-		too_soon = {k:[] for k in header[1:]}
-		for cname in keep_keys.keys():
-			last_k = None
-			for k in sorted(keep_keys[cname]):
-				# Skip first
-				if last_k is None:
-					last_k = k
-					continue
-
-				h = (k-last_k)/f0
-				mult = round(h)
-				print([cname, k, last_k, k-last_k, h, mult])
-
-				if last_k in [_[0] for _ in too_soon[cname]]:
-					print("Don't penalize next peak after Too Soon point")
-					last_k = k
-					continue
-
-				if h < 0.85:
-					# Weird point, probably PAC/PVC or P wave
-					print("Too soon")
-					too_soon[cname].append( (k, last_k, h, mult) )
-					pass
-				elif h < 1.15:
-					# First harmonic, skip it
-					pass
-				else:
-					print("Harmonic")
-					print([last_k, k, mult, list(harmonicrange(last_k, k, mult))])
-					for idx in harmonicrange(last_k, k, mult):
-						findmissingharmonicpeak(peaks, keep_keys, correlate, cname, last_k, k, idx, params, header)
-
-				# Update index for next loop
-				last_k = k
-
-		# 6F)
-		# TODO: for now just remove them
-		print(too_soon)
-		for cname in too_soon.keys():
-			for k, last_k, h, mult in too_soon[cname]:
-				keep_keys[cname].remove(k)
-
-		if False:
-			print("Kept")
-			print("index\tTime\tpreRank.N\tpreRank.min\tpreRank.max\tpreRank.mean\tsum/mean%max.N\tsum/mean%max.min\tsum/mean%max.max\tsum/mean%max.mean\tpeakPercentile\tvarPercentile")
-			for k in keep_keys:
-				_ = peaks[k]
-				print(k, end='\t')
-				print(k/2000, end='\t')
-				print(len(_['preRank']), end='\t')
-				print(min(_['preRank']), end='\t')
-				print(max(_['preRank']), end='\t')
-				print(sum(_['preRank'])/len(_['preRank']), end='\t')
-				print(len(_['sum/mean%max']), end='\t')
-				print(min(_['sum/mean%max']), end='\t')
-				print(max(_['sum/mean%max']), end='\t')
-				print(sum(_['sum/mean%max'])/len(_['sum/mean%max']), end='\t')
-				print(_['peakPercentile'], end='\t')
-				print(_['varPercentile'])
-
-			print()
-			print("Rejected")
-			print("index\tTime\t\tpreRank.N\tpreRank.min\tpreRank.max\tpreRank.mean\tsum/mean%max.N\tsum/mean%max.min\tsum/mean%max.max\tsum/mean%max.mean\tpeakPercentile\tvarPercentile")
-			for k in [_ for _ in peaks.keys() if _ not in keep_keys]:
-				_ = peaks[k]
-				print(k, end='\t')
-				print(k/2000, end='\t')
-				print(len(_['preRank']), end='\t')
-				print(min(_['preRank']), end='\t')
-				print(max(_['preRank']), end='\t')
-				print(sum(_['preRank'])/len(_['preRank']), end='\t')
-				print(len(_['sum/mean%max']), end='\t')
-				print(min(_['sum/mean%max']), end='\t')
-				print(max(_['sum/mean%max']), end='\t')
-				print(sum(_['sum/mean%max'])/len(_['sum/mean%max']), end='\t')
-				print(_['peakPercentile'], end='\t')
-				print(_['varPercentile'])
-			print()
-
-		# 7)
-		ret = ecgtopng(header, dat, keep_keys, self.WritePNG, width=params['PNG']['width'], speed=params['PNG']['speed'])
-
-		# 8)
-		cname = list(keep_keys.keys())[0]
-		RR = [keep_keys[cname][i] - keep_keys[cname][i-1] for i in range(1,len(keep_keys[cname]))]
-		for r in RR:
-			print(r)
+		return final
 
 	def ExportPNG(self, peaks, filegenerator, filesaver, width=10, speed=100):
 		"""
@@ -639,6 +434,11 @@ class pyzestyecg:
 		# 6 leads so 6 vertical sub plots
 		# FIXME: calculate programmatically
 		len_chans = 6
+
+		for cname in peaks.keys():
+			for idx,v in enumerate(peaks[cname]):
+				print("%10s %5d %d" % (cname, idx, v))
+			print("-----------------------------------------------------------------------------")
 
 		fig,axs = plt.subplots(len_chans)
 
@@ -696,8 +496,8 @@ class pyzestyecg:
 				match_points = [_ for _ in peaks[cname] if _ in rseg]
 
 				# Plot as red circles ("ro") on top of the ECG data
-				print([len(subd), match_points, fidx])
-				print([_-fidx for _ in match_points])
+				#print([len(subd), len(d), fidx, match_points])
+				#print([_-fidx for _ in match_points])
 				axs[i].plot([_/freq for _ in match_points], [subd[_-fidx] for _ in match_points], 'ro')
 
 			# Labels
