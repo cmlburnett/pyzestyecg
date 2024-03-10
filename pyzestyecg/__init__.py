@@ -207,7 +207,7 @@ class pyzestyecg:
 
 		# Data loaded, now process
 		for cidx,cname in enumerate(chans):
-			potentials[cname], peaks[cname] = processecg_single(cname, dat[cidx], self.Params, rignores, rnoise)
+			potentials[cname], peaks[cname] = self.processecg_single(cname, dat[cidx], self.Params, rignores, rnoise)
 
 		return (potentials, peaks)
 
@@ -249,7 +249,7 @@ class pyzestyecg:
 			for k in sorted(peaks[cname].keys()):
 				v = peaks[cname][k]
 
-				p = scoreit(self.Params, cname, k, v)
+				p = self.scoreit(self.Params, cname, k, v)
 				points[cname][k] = p
 
 				if sum(p) >= self.Params['Cutoffs']['Points']:
@@ -405,7 +405,7 @@ class pyzestyecg:
 					print("Harmonic")
 					print([last_k, k, mult, list(harmonicrange(last_k, k, mult))])
 					for idx in harmonicrange(last_k, k, mult):
-						findmissingharmonicpeak(peaks, final, correlate, cname, last_k, k, idx, self.Params, chans)
+						self.findmissingharmonicpeak(peaks, final, correlate, cname, last_k, k, idx, self.Params, chans)
 
 				# Update index for next loop
 				last_k = k
@@ -514,436 +514,411 @@ class pyzestyecg:
 				f.seek(0)
 				filesaver(idx, f)
 
-def findmissingharmonicpeak(peaks, keep_keys, correlate, cname, last_k, k, idx, params, header):
-	"""
-	Try to find a peak for lead @cname around index @idx, which was found using harmonic analysis between indices @last_k and @k.
-	"""
+	def findmissingharmonicpeak(self, peaks, keep_keys, correlate, cname, last_k, k, idx, params, header):
+		"""
+		Try to find a peak for lead @cname around index @idx, which was found using harmonic analysis between indices @last_k and @k.
+		"""
 
-	winwidth = params['LeadCorrelateWindow']
-	r = range(idx - winwidth, idx + winwidth)
+		winwidth = params['LeadCorrelateWindow']
+		r = range(idx - winwidth, idx + winwidth)
 
-	#print(['find peak', cname, idx, r])
-	possibles = [_ for _ in peaks[cname].keys() if _ in r]
-	#print(['possibles', possibles])
+		#print(['find peak', cname, idx, r])
+		possibles = [_ for _ in peaks[cname].keys() if _ in r]
+		#print(['possibles', possibles])
 
-	for p in possibles:
-		score = scoreit(params, cname,p, peaks[cname][p])
-		print([p, peaks[cname][p], score])
+		for p in possibles:
+			score = self.scoreit(params, cname,p, peaks[cname][p])
+			print([p, peaks[cname][p], score])
 
-		cnt = 0
-		idx = 0
-		for cn in header[1:]:
-			if cn == cname: continue
+			cnt = 0
+			idx = 0
+			for cn in header[1:]:
+				if cn == cname: continue
 
-			for hit in correlate[cname][p][idx]:
-				if hit in keep_keys[cn]:
-					cnt += 1
+				for hit in correlate[cname][p][idx]:
+					if hit in keep_keys[cn]:
+						cnt += 1
 
-			idx += 1
-		#print(['corr', cnt])
-		if cnt >= 3:
-			keep_keys[cname].append(p)
-			keep_keys[cname].sort()
-			break
+				idx += 1
+			#print(['corr', cnt])
+			if cnt >= 3:
+				keep_keys[cname].append(p)
+				keep_keys[cname].sort()
+				break
 
-def correlateleads(header, potentials, peaks, params):
-	"""
-	Correlated peaks across leads (they don't always happen at the same time index.
-	"""
+	def scoreit(self, params, cname, k, v):
+		"""
+		Based on processed parameters from an ECG peak, score it based on @params.
+		Lead name @cname at time index @k and dictionary of processed parameters @v.
+		"""
+		p = []
 
-	keys = {}
-	correlate = {}
-	for cname in header[1:]:
-		keys[cname] = sorted(peaks[cname].keys())
-
-	winwidth = params['LeadCorrelateWindow']
-	for mainkey in header[1:]:
-		correlate[mainkey] = {}
-
-		for k in keys[mainkey]:
-			r = range(k-winwidth, k+winwidth+1)
-			correlate[mainkey][k] = []
-
-			for cname in header[1:]:
-				if cname == mainkey: continue
-
-				correlate[mainkey][k].append( [_ for _ in peaks[cname] if _ in r] )
-
-	return correlate
-
-def scoreit(params, cname, k, v):
-	"""
-	Based on processed parameters from an ECG peak, score it based on @params.
-	Lead name @cname at time index @k and dictionary of processed parameters @v.
-	"""
-	p = []
-
-	if len(v['preRank']) <= 3:
-		p.append(-100)
-	elif len(v['preRank']) == 4:
-		p.append(0)
-	elif len(v['preRank']) == 5:
-		p.append(1)
-	else:
-		p.append( len(v['preRank']) - 5 )
-
-	if len(v['sum/mean%max']) <= 3:
-		p.append(-100)
-	elif len(v['sum/mean%max']) == 4:
-		p.append(0)
-	elif len(v['sum/mean%max']) == 5:
-		p.append(1)
-	else:
-		p.append( len(v['sum/mean%max']) - 5 )
-
-	if sum(v['preRank'])/len(v['preRank']) > 0.45:
-		p.append(2)
-	elif sum(v['preRank'])/len(v['preRank']) > 0.25:
-		p.append(1)
-	else:
-		p.append(0)
-
-	if sum(v['sum/mean%max'])/len(v['sum/mean%max']) > 0.50:
-		p.append(2)
-	elif sum(v['sum/mean%max'])/len(v['sum/mean%max']) > 0.20:
-		p.append(1)
-	elif sum(v['sum/mean%max'])/len(v['sum/mean%max']) < 0.20:
-		p.append(-2)
-	elif sum(v['sum/mean%max'])/len(v['sum/mean%max']) < 0.10:
-		p.append(-5)
-	elif sum(v['sum/mean%max'])/len(v['sum/mean%max']) < 0.01:
-		p.append(-50)
-	else:
-		p.append(0)
-
-	if v['peakPercentile'] > 0.90:
-		p.append(2)
-	elif v['peakPercentile'] > 0.70:
-		p.append(1)
-	else:
-		p.append(0)
-
-	if v['varPercentile'] < params['Cutoffs']['varPercentile']['minimum'][0]:
-		p.append(params['Cutoffs']['varPercentile']['minimum'][1])
-	elif v['varPercentile'] > params['Cutoffs']['varPercentile']['desired'][0]:
-		p.append(params['Cutoffs']['varPercentile']['desired'][1])
-	else:
-		p.append(0)
-
-	return p
-
-def processecg_single(cname, dat, params, ignores, noises):
-	"""
-	Process a single lead named @cname based on series of samples in @dat and use parameters @params as needed.
-	@rignores is a list of ranges in which samples should be ignored.
-	"""
-
-	# Steps to the algorithm:
-	#  1) Skip this number
-	#  2) Take d/dt
-	#  3) Take Hilbert transform
-	#  4) Calculate envelope function
-	#  5) Perform averaging/smoothing filter
-	#  6) Normalize to [0,1]
-	#  7) Make more polarized
-	#  8) Convolve a smoothing filter
-	#  9) Take d/dt
-	# 10) Find potential peaks
-	# 11) Compare potential peaks to the raw data and find the local maximum in the raw data
-	# 12) Calculate histogram for peaks
-	# 13) Calculate the PDF of the peaks
-	# 14) Update peak potentials with percentiles from (12)
-	# 15) Calculate delta time between potentials
-
-	len_dat = len(dat)
-	min_dat = min(dat)
-	print(['process', cname, len_dat, datetime.datetime.utcnow()])
-
-	# 2)
-	dat2 = [dat[i] - dat[i-1] for i in range(1,len_dat)] + [0]
-
-	# 3)
-	print(['A', cname, datetime.datetime.utcnow()])
-	h = GenHilbert(params['HilbertLength'])
-	f = list(ApplyFilter(dat2, h))
-
-	# 4)
-	print(['B', cname, datetime.datetime.utcnow()])
-	f2 = [math.sqrt(f[i]*f[i] + dat2[i]*dat2[i]) for i in range(0,len(f))]
-	# Delete, no longer needed
-	del dat2
-
-	# 5)
-	print(['C', cname, datetime.datetime.utcnow()])
-	f3 = ApplyFilter(f2, [1/params['Smoothing1']]*params['Smoothing1'])
-	# Delete, no longer needed
-	len_f2 = len(f2)
-	del f2
-
-	# 6)
-	print(['D', cname, datetime.datetime.utcnow()])
-	f3_min = min(f3)
-	f3 = [_ - f3_min for _ in f3]
-	f3_max = max(f3)
-	f3 = [_ / f3_max for _ in f3]
-
-	# 7)
-	print(['E', cname, datetime.datetime.utcnow()])
-	f4 = []
-	for i in range(len(f3)):
-		# Push towards zero or one to make more of a black/white selector
-		if f3[i] < 0.5:
-			f4.append( f3[i]*f3[i]*f3[i] )
+		if len(v['preRank']) <= 3:
+			p.append(-100)
+		elif len(v['preRank']) == 4:
+			p.append(0)
+		elif len(v['preRank']) == 5:
+			p.append(1)
 		else:
-			f4.append( 1-((1-f3[i])*(1-f3[i])*(1-f3[i])) )
-	# Delete, no longer needed
-	len_f3 = len(f3)
-	del f3
+			p.append( len(v['preRank']) - 5 )
 
-	# 8)
-	print(['F', cname, datetime.datetime.utcnow()])
-	ones = [1] * params['Smoothing2']
-	len_ones = len(ones)
-	f5 = [0] * (len(f4) - len_ones)
-	for i in range(len(f5)):
-		f5[i] = sum(f4[i-len_ones:i]) / len_ones
-	# Delete, no longer needed
-	len_f4 = len(f4)
-	del f4
+		if len(v['sum/mean%max']) <= 3:
+			p.append(-100)
+		elif len(v['sum/mean%max']) == 4:
+			p.append(0)
+		elif len(v['sum/mean%max']) == 5:
+			p.append(1)
+		else:
+			p.append( len(v['sum/mean%max']) - 5 )
 
-	# 9)
-	print(['G', cname, datetime.datetime.utcnow()])
-	f6 = [f5[i+1] - f5[i] for i in range(len(f5)-1)]
-	f6.append(0)
-	# Delete, no longer needed
-	len_f5 = len(f5)
-	del f5
-	len_f6 = len(f6)
+		if sum(v['preRank'])/len(v['preRank']) > 0.45:
+			p.append(2)
+		elif sum(v['preRank'])/len(v['preRank']) > 0.25:
+			p.append(1)
+		else:
+			p.append(0)
 
-	# 10A)
-	print(['H', cname, datetime.datetime.utcnow()])
-	potentials = {}
-	f6_mean = sum(f6)/len(f6)
+		if sum(v['sum/mean%max'])/len(v['sum/mean%max']) > 0.50:
+			p.append(2)
+		elif sum(v['sum/mean%max'])/len(v['sum/mean%max']) > 0.20:
+			p.append(1)
+		elif sum(v['sum/mean%max'])/len(v['sum/mean%max']) < 0.20:
+			p.append(-2)
+		elif sum(v['sum/mean%max'])/len(v['sum/mean%max']) < 0.10:
+			p.append(-5)
+		elif sum(v['sum/mean%max'])/len(v['sum/mean%max']) < 0.01:
+			p.append(-50)
+		else:
+			p.append(0)
 
-	widths = list(range(params['WindowWidthMax'],0,-5))
-	# Calculate areas onces per wdith
-	areas = {}
-	for width in widths:
-		areas[width] = f6_mean*(width-1)*2
+		if v['peakPercentile'] > 0.90:
+			p.append(2)
+		elif v['peakPercentile'] > 0.70:
+			p.append(1)
+		else:
+			p.append(0)
 
-	max_width = max(widths)
+		if v['varPercentile'] < params['Cutoffs']['varPercentile']['minimum'][0]:
+			p.append(params['Cutoffs']['varPercentile']['minimum'][1])
+		elif v['varPercentile'] > params['Cutoffs']['varPercentile']['desired'][0]:
+			p.append(params['Cutoffs']['varPercentile']['desired'][1])
+		else:
+			p.append(0)
 
-	print(['I', cname, datetime.datetime.utcnow(), widths])
-	for i in range(max_width, len_f6-max_width):
-		# Extract the range once and pull portions of this for smaller widths
-		pre_full = f6[i-max_width:i]
-		post_full = f6[i:i+max_width]
+		return p
 
+	def processecg_single(self, cname, dat, params, ignores, noises):
+		"""
+		Process a single lead named @cname based on series of samples in @dat and use parameters @params as needed.
+		@rignores is a list of ranges in which samples should be ignored.
+		"""
+
+		# Steps to the algorithm:
+		#  1) Skip this number
+		#  2) Take d/dt
+		#  3) Take Hilbert transform
+		#  4) Calculate envelope function
+		#  5) Perform averaging/smoothing filter
+		#  6) Normalize to [0,1]
+		#  7) Make more polarized
+		#  8) Convolve a smoothing filter
+		#  9) Take d/dt
+		# 10) Find potential peaks
+		# 11) Compare potential peaks to the raw data and find the local maximum in the raw data
+		# 12) Calculate histogram for peaks
+		# 13) Calculate the PDF of the peaks
+		# 14) Update peak potentials with percentiles from (12)
+		# 15) Calculate delta time between potentials
+
+		len_dat = len(dat)
+		min_dat = min(dat)
+		print(['process', cname, len_dat, datetime.datetime.utcnow()])
+
+		# 2)
+		dat2 = [dat[i] - dat[i-1] for i in range(1,len_dat)] + [0]
+
+		# 3)
+		print(['A', cname, datetime.datetime.utcnow()])
+		h = GenHilbert(params['HilbertLength'])
+		f = list(ApplyFilter(dat2, h))
+
+		# 4)
+		print(['B', cname, datetime.datetime.utcnow()])
+		f2 = [math.sqrt(f[i]*f[i] + dat2[i]*dat2[i]) for i in range(0,len(f))]
+		# Delete, no longer needed
+		del dat2
+
+		# 5)
+		print(['C', cname, datetime.datetime.utcnow()])
+		f3 = ApplyFilter(f2, [1/params['Smoothing1']]*params['Smoothing1'])
+		# Delete, no longer needed
+		len_f2 = len(f2)
+		del f2
+
+		# 6)
+		print(['D', cname, datetime.datetime.utcnow()])
+		f3_min = min(f3)
+		f3 = [_ - f3_min for _ in f3]
+		f3_max = max(f3)
+		f3 = [_ / f3_max for _ in f3]
+
+		# 7)
+		print(['E', cname, datetime.datetime.utcnow()])
+		f4 = []
+		for i in range(len(f3)):
+			# Push towards zero or one to make more of a black/white selector
+			if f3[i] < 0.5:
+				f4.append( f3[i]*f3[i]*f3[i] )
+			else:
+				f4.append( 1-((1-f3[i])*(1-f3[i])*(1-f3[i])) )
+		# Delete, no longer needed
+		len_f3 = len(f3)
+		del f3
+
+		# 8)
+		print(['F', cname, datetime.datetime.utcnow()])
+		ones = [1] * params['Smoothing2']
+		len_ones = len(ones)
+		f5 = [0] * (len(f4) - len_ones)
+		for i in range(len(f5)):
+			f5[i] = sum(f4[i-len_ones:i]) / len_ones
+		# Delete, no longer needed
+		len_f4 = len(f4)
+		del f4
+
+		# 9)
+		print(['G', cname, datetime.datetime.utcnow()])
+		f6 = [f5[i+1] - f5[i] for i in range(len(f5)-1)]
+		f6.append(0)
+		# Delete, no longer needed
+		len_f5 = len(f5)
+		del f5
+		len_f6 = len(f6)
+
+		# 10A)
+		print(['H', cname, datetime.datetime.utcnow()])
+		potentials = {}
+		f6_mean = sum(f6)/len(f6)
+
+		widths = list(range(params['WindowWidthMax'],0,-5))
+		# Calculate areas onces per wdith
+		areas = {}
 		for width in widths:
-			mean_area = areas[width]
+			areas[width] = f6_mean*(width-1)*2
 
-			# Trapezoidal area calculation proportional to the sum of y-values (delta x is identical so don't bother)
-			# Ends get summed once, but inner values get summed twice for adjacent trapezoids
-			#trap = [1] + ([2]*(width-2)) + [1]
+		max_width = max(widths)
 
-			# Get pre-window and post-window from the point f6[i] (zero crossing should have pre > 0 and post < 0)
-			pre = pre_full[-width:]
-			pre_area = 2*sum(pre) - pre[0] - pre[-1]
-			if pre_area <= 0.02: continue
+		print(['I', cname, datetime.datetime.utcnow(), widths])
+		for i in range(max_width, len_f6-max_width):
+			# Extract the range once and pull portions of this for smaller widths
+			pre_full = f6[i-max_width:i]
+			post_full = f6[i:i+max_width]
 
-			post = post_full[:width]
-			post_area = 2*sum(post) - post[0] - post[-1]
-			if post_area >= -0.02: continue
+			for width in widths:
+				mean_area = areas[width]
 
-			# Calculate ratio and invert so it's positive (ratio should be unity ideally)
-			# then subtract 1 and so ratio is percent away from unity
-			ratio = math.fabs( ((pre_area / post_area)*(-1)) - 1)
-			if ratio > params['RatioCutoff']: continue
+				# Trapezoidal area calculation proportional to the sum of y-values (delta x is identical so don't bother)
+				# Ends get summed once, but inner values get summed twice for adjacent trapezoids
+				#trap = [1] + ([2]*(width-2)) + [1]
 
-			# If reaches this point then all three are true
-			# - If pre area is negative, absolutely don't count it
-			# - If post area is positive, absolutely don't count it
-			# - Ratio > X% of unity don't count it (parameter)
+				# Get pre-window and post-window from the point f6[i] (zero crossing should have pre > 0 and post < 0)
+				pre = pre_full[-width:]
+				pre_area = 2*sum(pre) - pre[0] - pre[-1]
+				if pre_area <= 0.02: continue
 
-			# Window width that's wider is more supportive of being QRS
-			# Areas that are larger are more supportive of being QRS
-			# Ratio nearest to unity is more supportive of being QRS
-			# sum/mean being large is more supportive of being QRS
-			# sum/meam%max is percentile of highest sum/mean, higher the percentile is more supportive of being QRS
-			potentials[i] = {'window': width, 'pre': pre_area, 'post': post_area, 'sum': pre_area + post_area, 'ratio': ratio, 'sum/mean': pre_area/mean_area}
+				post = post_full[:width]
+				post_area = 2*sum(post) - post[0] - post[-1]
+				if post_area >= -0.02: continue
 
-			potentials[i]['ignored'] = any([i in _ for _ in ignores])
-			potentials[i]['noisy'] = ([i in _ for _ in noises])
-			break
+				# Calculate ratio and invert so it's positive (ratio should be unity ideally)
+				# then subtract 1 and so ratio is percent away from unity
+				ratio = math.fabs( ((pre_area / post_area)*(-1)) - 1)
+				if ratio > params['RatioCutoff']: continue
 
-	# Delete, no longer needed
-	del f6
+				# If reaches this point then all three are true
+				# - If pre area is negative, absolutely don't count it
+				# - If post area is positive, absolutely don't count it
+				# - Ratio > X% of unity don't count it (parameter)
 
-	# 10B)
-	# Calculate rank of pre-areas and normalize to [0,1]
-	print(['J', cname, datetime.datetime.utcnow()])
+				# Window width that's wider is more supportive of being QRS
+				# Areas that are larger are more supportive of being QRS
+				# Ratio nearest to unity is more supportive of being QRS
+				# sum/mean being large is more supportive of being QRS
+				# sum/meam%max is percentile of highest sum/mean, higher the percentile is more supportive of being QRS
+				potentials[i] = {'window': width, 'pre': pre_area, 'post': post_area, 'sum': pre_area + post_area, 'ratio': ratio, 'sum/mean': pre_area/mean_area}
 
-	# Sort by pre area
-	preareas = []
-	for k,v in potentials.items():
-		# Skip those ignored or noise
-		if v['ignored'] or v['noisy']: continue
+				potentials[i]['ignored'] = any([i in _ for _ in ignores])
+				potentials[i]['noisy'] = ([i in _ for _ in noises])
+				break
 
-		preareas.append( (k, v['pre']) )
-	preareas.sort(key=lambda _:_[1])
-	preareas_len = len(preareas)
+		# Delete, no longer needed
+		del f6
 
-	# Get rank and normalize to [0,1]
-	for idx,v in enumerate(preareas):
-		k = v[0]
-		potentials[k]['preRank'] = idx / preareas_len
+		# 10B)
+		# Calculate rank of pre-areas and normalize to [0,1]
+		print(['J', cname, datetime.datetime.utcnow()])
 
-	# 10C)
-	# Calculate percentile of maximum sum/mean values
-	print(['K', cname, datetime.datetime.utcnow()])
-	max_summean = max([_['sum/mean'] for _ in potentials.values()])
-	for k in potentials.keys():
-		# Skip those ignored or noise
-		if potentials[k]['ignored'] or potentials[k]['noisy']: continue
+		# Sort by pre area
+		preareas = []
+		for k,v in potentials.items():
+			# Skip those ignored or noise
+			if v['ignored'] or v['noisy']: continue
 
-		potentials[k]['sum/mean%max'] = potentials[k]['sum/mean'] / max_summean
+			preareas.append( (k, v['pre']) )
+		preareas.sort(key=lambda _:_[1])
+		preareas_len = len(preareas)
 
-	# 11)
-	print(['L', cname, datetime.datetime.utcnow()])
-	winwidth = params['MaximumWindowWidth']
-	maximums = {}
-	for k in sorted(potentials.keys()):
-		v = potentials[k]
+		# Get rank and normalize to [0,1]
+		for idx,v in enumerate(preareas):
+			k = v[0]
+			potentials[k]['preRank'] = idx / preareas_len
 
-		# Skip those ignored or noise
-		if v['ignored'] or v['noisy']: continue
+		# 10C)
+		# Calculate percentile of maximum sum/mean values
+		print(['K', cname, datetime.datetime.utcnow()])
+		max_summean = max([_['sum/mean'] for _ in potentials.values()])
+		for k in potentials.keys():
+			# Skip those ignored or noise
+			if potentials[k]['ignored'] or potentials[k]['noisy']: continue
 
-		#idx = k - params['Smoothing2'] - params['Smoothing1']
-		idx = k - round(params['Smoothing2']/2)
-		idx_min = int(idx-winwidth/2)
-		idx_max = int(idx+winwidth/2)
-		if idx_min < 0: idx_min = 0
-		if idx_max > len_dat: idx_max = len_dat
-		z = dat[idx_min:idx_max]
-		avg = sum(z)/len(z)
-		win = list(map(lambda _:math.fabs(_-avg), z))
-		mx = max(win)
-		idx = win.index(mx) + idx_min
-		v['Maximum'] = {'idx': idx, 'value': mx}
-		if idx not in maximums:
-			maximums[idx] = 0
-		maximums[idx] += 1
+			potentials[k]['sum/mean%max'] = potentials[k]['sum/mean'] / max_summean
 
-	# 12)
-	print(['M', cname, datetime.datetime.utcnow()])
-	maximums_histo = {}
-	variances = {}
-	for k,v in maximums.items():
-		if v not in maximums_histo:
-			maximums_histo[v] = 0
-		maximums_histo[v] += 1
+		# 11)
+		print(['L', cname, datetime.datetime.utcnow()])
+		winwidth = params['MaximumWindowWidth']
+		maximums = {}
+		for k in sorted(potentials.keys()):
+			v = potentials[k]
 
-		idx = k
-		idx_min = int(idx-winwidth/2)
-		idx_max = int(idx+winwidth/2)
-		if idx_min < 0: idx_min = 0
-		if idx_max > len_dat: idx_max = len_dat
-		win = list(map(lambda _:math.fabs(_), dat[idx_min:idx_max]))
-		avg = sum(win)/len(win)
-		var = sum([(_-avg)**2 for _ in win])/len(win)
-		variances[idx] = var
+			# Skip those ignored or noise
+			if v['ignored'] or v['noisy']: continue
 
-	# 13)
-	print(['N', cname, datetime.datetime.utcnow()])
-	maximums_N = len(maximums.keys())
-	maximums_p = {}
-	maximums_pdf = {}
-	running_sum = 0.0
-	for k in sorted(maximums_histo):
-		p = maximums_histo[k]/maximums_N
-		maximums_p[k] = p
-		running_sum += p
-		maximums_pdf[k] = running_sum
+			#idx = k - params['Smoothing2'] - params['Smoothing1']
+			idx = k - round(params['Smoothing2']/2)
+			idx_min = int(idx-winwidth/2)
+			idx_max = int(idx+winwidth/2)
+			if idx_min < 0: idx_min = 0
+			if idx_max > len_dat: idx_max = len_dat
+			z = dat[idx_min:idx_max]
+			avg = sum(z)/len(z)
+			win = list(map(lambda _:math.fabs(_-avg), z))
+			mx = max(win)
+			idx = win.index(mx) + idx_min
+			v['Maximum'] = {'idx': idx, 'value': mx}
+			if idx not in maximums:
+				maximums[idx] = 0
+			maximums[idx] += 1
 
-	# 14)
-	print(['O', cname, datetime.datetime.utcnow()])
-	for k in potentials.keys():
-		# Skip those ignored or noise
-		if potentials[k]['ignored'] or potentials[k]['noisy']: continue
+		# 12)
+		print(['M', cname, datetime.datetime.utcnow()])
+		maximums_histo = {}
+		variances = {}
+		for k,v in maximums.items():
+			if v not in maximums_histo:
+				maximums_histo[v] = 0
+			maximums_histo[v] += 1
 
-		# 'idx' is the index into @dat that is the local maximum for potential index of @k into @f6
-		peak_N = maximums[ potentials[k]['Maximum']['idx'] ]
-		# Thus, @peak_N is the number of times that @dat index showed up, so find it's percentile
-		potentials[k]['Maximum']['Percentile'] = maximums_pdf[peak_N]
-		# A wider potential set in @potentials that point to the same peak in @dat is supportive of being QRS
+			idx = k
+			idx_min = int(idx-winwidth/2)
+			idx_max = int(idx+winwidth/2)
+			if idx_min < 0: idx_min = 0
+			if idx_max > len_dat: idx_max = len_dat
+			win = list(map(lambda _:math.fabs(_), dat[idx_min:idx_max]))
+			avg = sum(win)/len(win)
+			var = sum([(_-avg)**2 for _ in win])/len(win)
+			variances[idx] = var
 
-	print(['P', cname, datetime.datetime.utcnow()])
-	peaks = {}
-	for k in sorted(potentials.keys()):
-		v = potentials[k]
+		# 13)
+		print(['N', cname, datetime.datetime.utcnow()])
+		maximums_N = len(maximums.keys())
+		maximums_p = {}
+		maximums_pdf = {}
+		running_sum = 0.0
+		for k in sorted(maximums_histo):
+			p = maximums_histo[k]/maximums_N
+			maximums_p[k] = p
+			running_sum += p
+			maximums_pdf[k] = running_sum
 
-		# Skip those ignored or noise
-		if v['ignored'] or v['noisy']: continue
+		# 14)
+		print(['O', cname, datetime.datetime.utcnow()])
+		for k in potentials.keys():
+			# Skip those ignored or noise
+			if potentials[k]['ignored'] or potentials[k]['noisy']: continue
 
-		idx = potentials[k]['Maximum']['idx']
+			# 'idx' is the index into @dat that is the local maximum for potential index of @k into @f6
+			peak_N = maximums[ potentials[k]['Maximum']['idx'] ]
+			# Thus, @peak_N is the number of times that @dat index showed up, so find it's percentile
+			potentials[k]['Maximum']['Percentile'] = maximums_pdf[peak_N]
+			# A wider potential set in @potentials that point to the same peak in @dat is supportive of being QRS
 
-		if idx not in peaks:
-			var = variances[idx]
-			peaks[idx] = {
-				'preRank': [],
-				'sum/mean%max': [],
-				'peakPercentile': v['Maximum']['Percentile'],
-				'varPercentile': var,
-			}
+		print(['P', cname, datetime.datetime.utcnow()])
+		peaks = {}
+		for k in sorted(potentials.keys()):
+			v = potentials[k]
 
-		peaks[idx]['preRank'].append( v['preRank'] )
-		peaks[idx]['sum/mean%max'].append( v['sum/mean%max'] )
+			# Skip those ignored or noise
+			if v['ignored'] or v['noisy']: continue
 
-	# 15)
-	print(['Q', cname, datetime.datetime.utcnow()])
-	last = 0
-	for k in sorted(potentials.keys()):
-		potentials[k]['deltaT'] = k - last
-		last = k
+			idx = potentials[k]['Maximum']['idx']
 
-	if False:
-		i_start = 30000
-		i_end = 31000
-		r = range(i_start, i_end)
+			if idx not in peaks:
+				var = variances[idx]
+				peaks[idx] = {
+					'preRank': [],
+					'sum/mean%max': [],
+					'peakPercentile': v['Maximum']['Percentile'],
+					'varPercentile': var,
+				}
 
-		pskeys = [_ for _ in peaks.keys() if _ in r]
-		ps = {_:peaks[_] for _ in pskeys}
+			peaks[idx]['preRank'].append( v['preRank'] )
+			peaks[idx]['sum/mean%max'].append( v['sum/mean%max'] )
 
-		fig,axs = plt.subplots(9)
+		# 15)
+		print(['Q', cname, datetime.datetime.utcnow()])
+		last = 0
+		for k in sorted(potentials.keys()):
+			potentials[k]['deltaT'] = k - last
+			last = k
 
-		axs[0].plot(r, dat[i_start:i_end])
-		# Plot as red circles ("ro") on top of the ECG data
-		axs[0].plot(pskeys, [dat[_] for _ in pskeys], 'ro')
+		if False:
+			i_start = 30000
+			i_end = 31000
+			r = range(i_start, i_end)
 
-		axs[1].plot(r, dat2[i_start:i_end])
-		axs[2].plot(r, f[i_start:i_end])
-		axs[3].plot(r, f2[i_start:i_end])
-		axs[4].plot(r, f3[i_start:i_end])
-		axs[5].plot(r, f4[i_start:i_end])
-		axs[6].plot(r, f5[i_start:i_end])
-		axs[7].plot(r, f6[i_start:i_end])
-		axs[8].plot(pskeys, [peaks[_]['varPercentile'] for _ in pskeys], 'ro')
-		axs[8].xaxis.set_view_interval( *axs[7].xaxis.get_view_interval() )
+			pskeys = [_ for _ in peaks.keys() if _ in r]
+			ps = {_:peaks[_] for _ in pskeys}
 
-		axs[0].set_ylabel("Data")
-		axs[1].set_ylabel("d/dt")
-		axs[2].set_ylabel("Hilbert Transformed")
-		axs[3].set_ylabel("Envelope Function")
-		axs[4].set_ylabel("Normalize to [0,1]")
-		axs[5].set_ylabel("Noise Reduction")
-		axs[6].set_ylabel("Apply Smoothing")
-		axs[7].set_ylabel("d/dt")
-		axs[8].set_ylabel("Peak Variance")
+			fig,axs = plt.subplots(9)
 
-		fig.set_figwidth(20)
-		fig.set_figheight(20)
-		plt.savefig('snippet-%s.png' % cname, bbox_inches='tight')
+			axs[0].plot(r, dat[i_start:i_end])
+			# Plot as red circles ("ro") on top of the ECG data
+			axs[0].plot(pskeys, [dat[_] for _ in pskeys], 'ro')
 
-	print(['R', cname, datetime.datetime.utcnow(), len(potentials), len(peaks)])
-	return potentials, peaks
+			axs[1].plot(r, dat2[i_start:i_end])
+			axs[2].plot(r, f[i_start:i_end])
+			axs[3].plot(r, f2[i_start:i_end])
+			axs[4].plot(r, f3[i_start:i_end])
+			axs[5].plot(r, f4[i_start:i_end])
+			axs[6].plot(r, f5[i_start:i_end])
+			axs[7].plot(r, f6[i_start:i_end])
+			axs[8].plot(pskeys, [peaks[_]['varPercentile'] for _ in pskeys], 'ro')
+			axs[8].xaxis.set_view_interval( *axs[7].xaxis.get_view_interval() )
+
+			axs[0].set_ylabel("Data")
+			axs[1].set_ylabel("d/dt")
+			axs[2].set_ylabel("Hilbert Transformed")
+			axs[3].set_ylabel("Envelope Function")
+			axs[4].set_ylabel("Normalize to [0,1]")
+			axs[5].set_ylabel("Noise Reduction")
+			axs[6].set_ylabel("Apply Smoothing")
+			axs[7].set_ylabel("d/dt")
+			axs[8].set_ylabel("Peak Variance")
+
+			fig.set_figwidth(20)
+			fig.set_figheight(20)
+			plt.savefig('snippet-%s.png' % cname, bbox_inches='tight')
+
+		print(['R', cname, datetime.datetime.utcnow(), len(potentials), len(peaks)])
+		return potentials, peaks
 
