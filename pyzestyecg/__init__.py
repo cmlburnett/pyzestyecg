@@ -249,7 +249,7 @@ class pyzestyecg:
 			for k in sorted(peaks[cname].keys()):
 				v = peaks[cname][k]
 
-				p = self.scoreit(self.Params, cname, k, v)
+				p = __class__.scoreit(self.Params, cname, k, v)
 				points[cname][k] = p
 
 				if sum(p) >= self.Params['Cutoffs']['Points']:
@@ -405,7 +405,7 @@ class pyzestyecg:
 					print("Harmonic")
 					print([last_k, k, mult, list(harmonicrange(last_k, k, mult))])
 					for idx in harmonicrange(last_k, k, mult):
-						self.findmissingharmonicpeak(peaks, final, correlate, cname, last_k, k, idx, self.Params, chans)
+						__class__.findmissingharmonicpeak(peaks, final, correlate, cname, last_k, k, idx, self.Params, chans)
 
 				# Update index for next loop
 				last_k = k
@@ -514,7 +514,8 @@ class pyzestyecg:
 				f.seek(0)
 				filesaver(idx, f)
 
-	def findmissingharmonicpeak(self, peaks, keep_keys, correlate, cname, last_k, k, idx, params, header):
+	@staticmethod
+	def findmissingharmonicpeak(peaks, keep_keys, correlate, cname, last_k, k, idx, params, header):
 		"""
 		Try to find a peak for lead @cname around index @idx, which was found using harmonic analysis between indices @last_k and @k.
 		"""
@@ -527,7 +528,7 @@ class pyzestyecg:
 		#print(['possibles', possibles])
 
 		for p in possibles:
-			score = self.scoreit(params, cname,p, peaks[cname][p])
+			score = __class__.scoreit(params, cname,p, peaks[cname][p])
 			print([p, peaks[cname][p], score])
 
 			cnt = 0
@@ -546,7 +547,8 @@ class pyzestyecg:
 				keep_keys[cname].sort()
 				break
 
-	def scoreit(self, params, cname, k, v):
+	@staticmethod
+	def scoreit(params, cname, k, v):
 		"""
 		Based on processed parameters from an ECG peak, score it based on @params.
 		Lead name @cname at time index @k and dictionary of processed parameters @v.
