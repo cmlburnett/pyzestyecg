@@ -539,7 +539,7 @@ class pyzestyecg:
 			# Labels
 			plt.xlabel("Time (sec)")
 			axs[-1].xaxis.set_major_locator(matplotlib.ticker.MultipleLocator(0.1))
-			axs[-1].xaxis.set_major_formatter('{x:.1f}')
+			axs[-1].xaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter('%.1f'))
 			axs[-1].xaxis.set_minor_locator(matplotlib.ticker.MultipleLocator(0.025))
 
 			# Format figure size
