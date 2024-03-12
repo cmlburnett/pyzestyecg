@@ -300,7 +300,7 @@ class pyzestyecg:
 
 	def CalculateRR(self, chans, peaks, correlate, keep, remove, user, final, intervals, noise):
 		"""
-		Calculate RR based on the intervals provided.
+		Calculate RR based on the intervals provided using an incremental histogram.
 		@intervals is a dictionary mapping named regions to a list of (start,stop) frames that are in that named region.
 		@noise is a list of (start,stop) regions that are ignored from analysis as user indicates it is noise.
 		"""
@@ -322,6 +322,44 @@ class pyzestyecg:
 			for v in keep[cname]:
 				if (cname,v) in remove:
 					pass
+				elif v in user['Remove'][cname]:
+					pass
+				else:
+					sub.append(v)
+
+			sub += user['Keep'][cname]
+			sub = list(set(sub))
+			sub.sort()
+			# Store final list
+			final[cname] = sub
+
+
+		return final
+
+	def CalculateRR_whole(self, chans, peaks, correlate, keep, remove, user, final, intervals, noise):
+		"""
+		Calculate RR based on the intervals provided using a histogram of the complete recording.
+		@intervals is a dictionary mapping named regions to a list of (start,stop) frames that are in that named region.
+		@noise is a list of (start,stop) regions that are ignored from analysis as user indicates it is noise.
+		"""
+
+		# Final list of peaks
+		#  Those in @keep are kept
+		#  Unless in @remove or @user['Remove']
+		#  Add [back in] any points in @user['Keep']
+		final = {}
+
+		# 6A)
+		# 6B)
+		print(['A', datetime.datetime.utcnow()])
+		histo = {}
+		for cname in keep.keys():
+			print(['A1', datetime.datetime.utcnow(), cname])
+
+			sub = []
+			for v in keep[cname]:
+				if (cname,v) in remove:
+				pass
 				elif v in user['Remove'][cname]:
 					pass
 				else:
