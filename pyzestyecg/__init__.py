@@ -316,8 +316,6 @@ class pyzestyecg:
 		print(['A', datetime.datetime.utcnow()])
 		histo = {}
 		for cname in keep.keys():
-			print(['A1', datetime.datetime.utcnow(), cname])
-
 			sub = []
 			for v in keep[cname]:
 				if (cname,v) in remove:
@@ -458,6 +456,61 @@ class pyzestyecg:
 
 		return final
 
+	def ExportPeaksByPNG(self, chans, peaks, correlate, keep, remove, user, final, intervals, noise, filegenerator, filesaver, width=10, speed=100):
+		"""
+		Export peak data that goes with each PNG file.
+		Lot of copy/paste logic from ExportPNG()
+		"""
+
+		### COPY/pASTE FROM EXPORTPNG ###
+		tstart = self.WIFF.recording[1].frame_table.fidx_start
+		tend = self.WIFF.recording[1].frame_table.fidx_end
+
+		# Total time delta across all leads
+		delta = tend - tstart
+
+		# Get sampling rate
+		freq = self.WIFF.recording[1].sampling
+
+		# Calculate samples per page with 25.4 mm = 1 inch
+		# samps = (in * 25.4 mm/in) / (mm/sec) * (samples/sec)
+		samps = (width * 25.4) / speed * freq
+
+		# Truncate to whole sample to step
+		step = int(samps)
+		r = range(0, delta, step)
+		### COPY/pASTE FROM EXPORTPNG ###
+
+		cname = chans[0]
+
+		rr = []
+		for idx,fidx in enumerate(r):
+			rseg = range(fidx, fidx+step)
+			# Filter out the peaks data for the time slice
+			match_points = [str(_) for _ in final[cname] if _ in rseg]
+
+			with filegenerator(idx) as f:
+				dat = "\n".join(match_points)
+				filesaver(idx, f)
+
+	def ExportRR(self, chans, peaks, correlate, keep, remove, user, final, intervals, noise, filegenerator, filesaver):
+		"""
+		Export RR data as three columns: start index, end index, RR interval (end-start)
+		One file per lead in the EKG.
+		"""
+
+		for cname in chans:
+			dat = []
+
+			with filegenerator(cname) as f:
+				for idx in range(1,len(final[cname])):
+					s = final[cname][idx-1]
+					e = final[cname][idx]
+					z = "%d\t%d\t%d\n" % (s,e,e-s)
+					f.write(z.encode('utf8'))
+
+				filesaver(cname,f)
+
 	def ExportPNG(self, peaks, filegenerator, filesaver, width=10, speed=100):
 		"""
 		Export data to PNG files.
@@ -470,11 +523,6 @@ class pyzestyecg:
 		# 6 leads so 6 vertical sub plots
 		# FIXME: calculate programmatically
 		len_chans = 6
-
-		for cname in peaks.keys():
-			for idx,v in enumerate(peaks[cname]):
-				print("%10s %5d %d" % (cname, idx, v))
-			print("-----------------------------------------------------------------------------")
 
 		fig,axs = plt.subplots(len_chans)
 
