@@ -359,7 +359,7 @@ class pyzestyecg:
 			sub = []
 			for v in keep[cname]:
 				if (cname,v) in remove:
-				pass
+					pass
 				elif v in user['Remove'][cname]:
 					pass
 				else:
