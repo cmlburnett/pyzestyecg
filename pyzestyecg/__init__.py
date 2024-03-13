@@ -159,6 +159,12 @@ class pyzestyecg:
 					'desired': (5000.0, +1),
 				},
 				'Points': 3,
+				'Harmonics': {
+					'Low': 0.85,
+					'High': 1.15,
+					'MaxMultiple': 4,
+					'LeadCorrelates': 3,
+				}
 			},
 			'LeadCorrelateWindow': 10,
 			'PNG': {
@@ -429,13 +435,16 @@ class pyzestyecg:
 					last_k = k
 					continue
 
-				if h < 0.85:
+				if h < self.Params['Cutoffs']['Harmonics']['Low']:
 					# Weird point, probably PAC/PVC or P wave
 					print("Too soon")
 					too_soon[cname].append( (k, last_k, h, mult) )
 					pass
-				elif h < 1.15:
+				elif h < self.Params['Cutoffs']['Harmonics']['High']:
 					# First harmonic, skip it
+					pass
+				elif mult <= self.Params['Cutoffs']['Harmonics']['MaxMultiple']:
+					# Too many harmonics high
 					pass
 				else:
 					print("Harmonic")
