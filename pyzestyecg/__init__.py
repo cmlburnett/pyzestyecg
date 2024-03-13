@@ -607,9 +607,10 @@ class pyzestyecg:
 		for cname in chans:
 			with filegenerator(cname) as f:
 				keys = list(final[cname].keys())
-				last_idx = keys[0]
 
+				last_idx = 0
 				for idx in range(1,len(keys)):
+					print([last_idx, idx, len(keys)])
 					s = keys[last_idx]
 					e = keys[idx]
 
@@ -619,7 +620,7 @@ class pyzestyecg:
 
 					z = "%d\t%d\t%d\n" % (s,e,e-s)
 					f.write(z.encode('utf8'))
-					last_idx = e
+					last_idx = idx
 
 				filesaver(cname,f)
 
