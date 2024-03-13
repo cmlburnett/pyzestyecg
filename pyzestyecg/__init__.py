@@ -859,7 +859,7 @@ class pyzestyecg:
 		# Calculate areas onces per wdith
 		areas = {}
 		for width in widths:
-			areas[width] = f6_mean*(width-1)*2
+			areas[width] = math.fabs(f6_mean*(width-1)*2)
 
 		max_width = max(widths)
 
@@ -900,7 +900,7 @@ class pyzestyecg:
 				# Ratio nearest to unity is more supportive of being QRS
 				# sum/mean being large is more supportive of being QRS
 				# sum/meam%max is percentile of highest sum/mean, higher the percentile is more supportive of being QRS
-				potentials[i] = {'window': width, 'pre': pre_area, 'post': post_area, 'sum': pre_area + post_area, 'ratio': ratio, 'sum/mean': pre_area/mean_area}
+				potentials[i] = {'window': width, 'pre': pre_area, 'post': post_area, 'sum': pre_area + post_area, 'ratio': ratio, 'sum/mean': math.fabs(pre_area/mean_area)}
 
 				potentials[i]['ignored'] = any([i in _ for _ in ignores])
 				potentials[i]['noisy'] = any([i in _ for _ in noises])
