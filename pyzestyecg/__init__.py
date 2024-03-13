@@ -259,15 +259,13 @@ class pyzestyecg:
 				points[cname][k] = p
 
 				if sum(p) >= self.Params['Cutoffs']['Points']:
-					#print([cname, k, k/2000, sum(p), p, 'keep'])
 					keep_keys[cname].append(k)
 				else:
-					#print([cname, k, k/2000, sum(p), p, 'pass'])
 					pass
 
 		return (points, keep_keys)
 
-	def GetRemoveKeys(self, chans, correlate, points, keep):
+	def GetRemoveKeys(self, chans, potentials, peaks, correlate, points, keep):
 		remove = []
 		for cname,v in keep.items():
 			print(['A', cname, datetime.datetime.utcnow()])
@@ -358,33 +356,23 @@ class pyzestyecg:
 		print(['A', datetime.datetime.utcnow()])
 		histo = {}
 		for cname in keep.keys():
-			print(['A1', datetime.datetime.utcnow(), cname])
+			# Copy entire list first then remove
+			final[cname] = {k:{} for k in keep[cname]}
 
-			sub = []
-			for v in keep[cname]:
-				if (cname,v) in remove:
-					pass
-				elif v in user['Remove'][cname]:
-					pass
+			for k in keep[cname]:
+				if (cname,k) in remove:
+					final[cname][k]['poorlycorrelated'] = True
 				else:
-					sub.append(v)
+					final[cname][k]['poorlycorrelated'] = False
 
-			sub += user['Keep'][cname]
-			sub = list(set(sub))
+			sub = list(final[cname].keys())
 			sub.sort()
-			final[cname] = {k:{} for k in sub}
-
-			len_sub = len(sub)
-			print(['len sub', len_sub])
+			len_sub = len(final[cname])
 			for i in range(1,len_sub):
-				if i % 10000 == 0:
-					print(['i', i])
 				rr = sub[i] - sub[i-1]
 				if rr not in histo: histo[rr] = 0
 				histo[rr] += 1
-				print("%20s %d" % (cname, rr))
 
-		print("----------------------")
 		for k in sorted(histo.keys()):
 			print("%20s %s" % (str(k), histo[k]))
 
@@ -396,7 +384,6 @@ class pyzestyecg:
 		# So the fundamental frequency is limited to min(histo.keys()) to avg
 		print(['C', datetime.datetime.utcnow()])
 		avg = sum([k*v for k,v in histo.items()])/sum(histo.values())
-		print(['avg', avg])
 
 		# 6D)
 		# Get the average of the first harmonic, this average is likely pretty close
@@ -410,7 +397,6 @@ class pyzestyecg:
 			f0 += k*v
 			len_f0 += v
 		f0 /= len_f0
-		print(['f0', f0, len_f0, avg2])
 
 		# 6E)
 		# Now go back through ECG data and find gaps larger than f0, particularly if an integer multiple suggesting missed complexes
@@ -423,11 +409,15 @@ class pyzestyecg:
 				# Skip first
 				if last_k is None:
 					last_k = k
+					final[cname][k]['f0'] = f0
+					final[cname][k]['h'] = 1
+					final[cname][k]['mult'] = 1
+					final[cname][k]['result'] = 'initialpoint'
+					final[cname][k]['toosoon'] = False
 					continue
 
 				h = (k-last_k)/f0
 				mult = round(h)
-				#print([cname, k, last_k, k-last_k, h, mult])
 				final[cname][k]['f0'] = f0
 				final[cname][k]['h'] = h
 				final[cname][k]['mult'] = mult
@@ -435,13 +425,11 @@ class pyzestyecg:
 				final[cname][k]['toosoon'] = False
 
 				if last_k in [_[0] for _ in too_soon[cname]]:
-					print("Don't penalize next peak after Too Soon point")
 					last_k = k
 					continue
 
 				if h < self.Params['Cutoffs']['Harmonics']['Low']:
 					# Weird point, probably PAC/PVC or P wave
-					print("Too soon")
 					too_soon[cname].append( (k, last_k, h, mult) )
 					final[cname][k]['result'] = 'toosoon'
 					pass
@@ -449,16 +437,21 @@ class pyzestyecg:
 					# First harmonic, skip it
 					final[cname][k]['result'] = '1st'
 					pass
-				elif mult <= self.Params['Cutoffs']['Harmonics']['MaxMultiple']:
+				elif mult > self.Params['Cutoffs']['Harmonics']['MaxMultiple']:
 					# Too many harmonics high
 					final[cname][k]['result'] = 'toomanyharmonics'
 					pass
 				else:
-					print("Harmonic")
 					final[cname][k]['result'] = 'harmonic'
-					print([last_k, k, mult, list(harmonicrange(last_k, k, mult))])
 					for idx in harmonicrange(last_k, k, mult):
-						__class__.findmissingharmonicpeak(peaks, final, correlate, cname, last_k, k, idx, self.Params, chans)
+						toadd = __class__.findmissingharmonicpeak(peaks, final, correlate, cname, last_k, k, idx, self.Params, chans)
+						for idx in toadd:
+							final[cname][k]['f0'] = f0
+							final[cname][k]['h'] = (idx-k)/f0
+							final[cname][k]['mult'] = round(final[cname][k]['h'])
+							final[cname][k]['result'] = 'correlated'
+							final[cname][k]['toosoon'] = False
+						# Continue in case there's more harmonics found
 
 				# Update index for next loop
 				last_k = k
@@ -466,13 +459,9 @@ class pyzestyecg:
 		# 6F)
 		# TODO: for now just remove them
 		print(['F', datetime.datetime.utcnow()])
-		print(too_soon)
 		for cname in too_soon.keys():
 			for k, last_k, h, mult in too_soon[cname]:
 				final[cname][k]['toosoon'] = True
-
-		print(final)
-		raise NotImplementedError
 
 		return final
 
@@ -519,7 +508,7 @@ class pyzestyecg:
 				remove_points = [_ for _ in remove if _[0] == cname and _[1] in rseg]
 				userkeep_points = [_ for _ in user['Keep'][cname] if _ in rseg]
 				userremove_points = [_ for _ in user['Remove'][cname] if _ in rseg]
-				final_points = {k:v for k,v in final[cname].items() for k in rseg}
+				final_points = {k:v for k,v in final[cname].items() if k in rseg}
 
 				with filegenerator(idx) as f:
 					header = "Start\t%d\nEnd\t%d\nStep\t%d\nSamplingRate\t%d\nLead\t%s\n" % (fidx, fidx+step, step, freq, cname)
@@ -527,7 +516,7 @@ class pyzestyecg:
 					header += '\n'
 					header += "\t".join(['Index','Time','len(preRank)','avg(preRank)','len(sum/mean%max)','avg(sum/mean%max)','peakPercentile','varPercentile','Score','sum(score)','Potentials'])
 					header += '\n'
-					header += "\t".join(['Index','Time','f0','h','mult','result','toosoon'])
+					header += "\t".join(['Index','Time','f0','h','mult','result','toosoon','poorlycorrelated'])
 					header += '\n\n'
 					f.write(header.encode('utf8'))
 
@@ -590,7 +579,6 @@ class pyzestyecg:
 					# Write final points
 					dat.clear()
 					for k,v in final_points.items():
-						print(['final', cname, k, v])
 						d = (
 							k,
 							k/freq,
@@ -598,7 +586,8 @@ class pyzestyecg:
 							v['h'],
 							v['mult'],
 							v['result'],
-							v['toosoon'],
+							int(v['toosoon']),
+							int(v['poorlycorrelated']),
 						)
 						dat.append(d)
 					dat.sort(key=lambda _:_[0])
@@ -618,13 +607,17 @@ class pyzestyecg:
 		for cname in chans:
 			with filegenerator(cname) as f:
 				keys = list(final[cname].keys())
+				last_idx = 0
 				for idx in range(1,len(final[cname].keys())):
-					prek = keys[idx-1]
-					k = keys[idx]
-					s = final[cname][prek]
-					e = final[cname][k]
+					# Skip these
+					if final[cname][idx]['toosoon']:
+						continue
+
+					s = keys[last_idx]
+					e = keys[idx]
 					z = "%d\t%d\t%d\n" % (s,e,e-s)
 					f.write(z.encode('utf8'))
+					last_idx = idx
 
 				filesaver(cname,f)
 
@@ -693,7 +686,7 @@ class pyzestyecg:
 				axs[i].plot(list(map(lambda _:(_+idx*step)/freq, range(0, len(d)))), subd)
 
 				# Filter out the peaks data for the time slice
-				match_points = [_ for _ in peaks[cname] if _ in rseg]
+				match_points = [_ for _ in peaks[cname] if _ in rseg and not peaks[cname][_]['toosoon']]
 
 				# Plot as red circles ("ro") on top of the ECG data
 				#print([len(subd), len(d), fidx, match_points])
@@ -717,10 +710,11 @@ class pyzestyecg:
 				filesaver(idx, f)
 
 	@staticmethod
-	def findmissingharmonicpeak(peaks, keep_keys, correlate, cname, last_k, k, idx, params, header):
+	def findmissingharmonicpeak(peaks, final, correlate, cname, last_k, k, idx, params, header):
 		"""
 		Try to find a peak for lead @cname around index @idx, which was found using harmonic analysis between indices @last_k and @k.
 		"""
+		toadd = []
 
 		winwidth = params['LeadCorrelateWindow']
 		r = range(idx - winwidth, idx + winwidth)
@@ -739,16 +733,16 @@ class pyzestyecg:
 				if cn == cname: continue
 
 				for hit in correlate[cname][p][idx]:
-					if hit in keep_keys[cn]:
+					if hit in final[cn]:
 						cnt += 1
 
 				idx += 1
 			print(['corr', cnt])
 			if cnt >= params['Cutoffs']['Harmonics']['LeadCorrelates']:
-				#final[cname][k][p]['result'] = 
-				keep_keys[cname].append(p)
-				keep_keys[cname].sort()
+				toadd.append(p)
 				break
+
+		return toadd
 
 	@staticmethod
 	def scoreit(params, cname, k, v):
@@ -758,23 +752,8 @@ class pyzestyecg:
 		"""
 		p = []
 
-		if len(v['preRank']) < 2:
-			p.append(-100)
-		elif len(v['preRank']) in (2,3,4):
-			p.append(0)
-		elif len(v['preRank']) == 5:
-			p.append(1)
-		else:
-			p.append( len(v['preRank']) - 5 )
-
-		if len(v['sum/mean%max']) < 2:
-			p.append(-100)
-		elif len(v['sum/mean%max']) in (2,3,4):
-			p.append(0)
-		elif len(v['sum/mean%max']) == 5:
-			p.append(1)
-		else:
-			p.append( len(v['sum/mean%max']) - 5 )
+		p.append(len(v['preRank']))
+		p.append(len(v['sum/mean%max']))
 
 		if sum(v['preRank'])/len(v['preRank']) > 0.45:
 			p.append(2)
