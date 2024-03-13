@@ -607,17 +607,19 @@ class pyzestyecg:
 		for cname in chans:
 			with filegenerator(cname) as f:
 				keys = list(final[cname].keys())
-				last_idx = 0
-				for idx in range(1,len(final[cname].keys())):
-					# Skip these
-					if final[cname][idx]['toosoon']:
-						continue
+				last_idx = keys[0]
 
+				for idx in range(1,len(keys)):
 					s = keys[last_idx]
 					e = keys[idx]
+
+					# Skip these
+					if final[cname][e]['toosoon']:
+						continue
+
 					z = "%d\t%d\t%d\n" % (s,e,e-s)
 					f.write(z.encode('utf8'))
-					last_idx = idx
+					last_idx = e
 
 				filesaver(cname,f)
 
