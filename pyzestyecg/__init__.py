@@ -499,12 +499,15 @@ class pyzestyecg:
 				remove_points = [_ for _ in remove if _[0] == cname and _[1] in rseg]
 				userkeep_points = [_ for _ in user['Keep'][cname] if _ in rseg]
 				userremove_points = [_ for _ in user['Remove'][cname] if _ in rseg]
+				final_points = [_ for _ in final[cname] if _ in rseg]
 
 				with filegenerator(idx) as f:
 					header = "Start\t%d\nEnd\t%d\nStep\t%d\nSamplingRate\t%d\nLead\t%s\n" % (fidx, fidx+step, step, freq, cname)
 					header += "\t".join(['Index','Time','Keep','Remove','UserKeep','UserRemove','Ignored','Noisy','Window','pre','post','sum','ratio','sum/mean','MaximumIndex','MaximumPercentile'])
 					header += '\n'
 					header += "\t".join(['Index','Time','len(preRank)','avg(preRank)','len(sum/mean%max)','avg(sum/mean%max)','peakPercentile','varPercentile','Score','sum(score)','Potentials'])
+					header += '\n'
+					header += "\t".join(['Index','Time'])
 					header += '\n\n'
 					f.write(header.encode('utf8'))
 
@@ -536,7 +539,7 @@ class pyzestyecg:
 						f.write( z.encode('utf8'))
 
 					# Space rows
-					f.write('\n\n'.encode('utf8'))
+					f.write('\n'.encode('utf8'))
 
 					dat.clear()
 					for k,v in peaks_points.items():
@@ -553,6 +556,23 @@ class pyzestyecg:
 							",".join(map(str,score)),
 							sum(score),
 							",".join([str(_) for _ in v['potentials']]),
+						)
+						dat.append(d)
+					dat.sort(key=lambda _:_[0])
+
+					for d in dat:
+						z = "\t".join([str(_) for _ in d]) + '\n'
+						f.write( z.encode('utf8'))
+
+					# Space rows
+					f.write('\n'.encode('utf8'))
+
+					# Write final points
+					dat.clear()
+					for k in final_points:
+						d = (
+							k,
+							k/freq,
 						)
 						dat.append(d)
 					dat.sort(key=lambda _:_[0])
