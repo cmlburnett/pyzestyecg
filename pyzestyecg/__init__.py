@@ -487,7 +487,7 @@ class pyzestyecg:
 			rseg = range(fidx, fidx+step)
 			# Filter out the peaks data for the time slice
 			potentials_points = {k:v for k,v in potentials[cname].items() if k in rseg}
-			match_points = [_ for _ in final[cname] if _ in rseg]
+			peaks_points = {k:v for k,v in peaks[cname].items() if k in rseg}
 			keep_points = [_ for _ in keep[cname] if _ in rseg]
 			remove_points = [_ for _ in remove if _[0] == cname and _[1] in rseg]
 			userkeep_points = [_ for _ in user['Keep'][cname] if _ in rseg]
@@ -495,17 +495,17 @@ class pyzestyecg:
 
 			with filegenerator(idx) as f:
 				header = "Start\t%d\nEnd\t%d\nStep\t%d\nSamplingRate\t%d\nLead\t%s\n" % (fidx, fidx+step, step, freq, cname)
-				header += "\t".join(['Match','Keep','Remove','UserKeep','UserRemove','Ignored','Noisy','Window','pre','post','sum','ratio','sum/mean','preRank','sum/mean%max','MaximumPercentile','peakPercentile','varPercentile','Score'])
+				header += "\t".join(['Index','Time','Keep','Remove','UserKeep','UserRemove','Ignored','Noisy','Window','pre','post','sum','ratio','sum/mean','MaximumIndex','MaximumPercentile'])
+				header += '\n'
+				header += "\t".join(['Index','Time','len(preRank)','avg(preRank)','len(sum/mean%max)','avg(sum/mean%max)','peakPercentile','varPercentile','Score','sum(score)','Potentials'])
+				header += '\n\n'
 				f.write(header.encode('utf8'))
 
 				dat = []
 				for k,v in potentials_points.items():
-					score = 0
-					if 'preRank' in v and 'sum/mean%max' in v and 'peakPercentile' in v and 'varPercentile' in v:
-						score = __class__.scoreit(params, cname,k,potentials[cname][k])
 					d = (
 						k,
-						int(k in match_points), # 1 if a final point, 0 if a potential point
+						k/samps,
 						int(k in keep_points), # 1 if a keep point
 						int(k in remove_points), # 1 if a remove point
 						int(k in userkeep_points), # 1 if a user kept point
@@ -518,20 +518,41 @@ class pyzestyecg:
 						v['sum'],
 						v['ratio'],
 						v['sum/mean'],
-						v.get('preRank', 0),
-						v.get('sum/mean%max', 0),
+						v.get('Maximum', 0) and v['Maximum']['idx'] or 0,
 						v.get('Maximum', 0) and v['Maximum']['Percentile'] or 0,
-						v.get('peakPercentile', 0),
-						v.get('varPercentile', 0),
-						score,
 					)
-					d = [str(_) for _ in d]
-					d = "\t".join(d)
-					print([k, d])
 					dat.append(d)
+				dat.sort(key=lambda _:_[0])
 
-				dat = "\n".join(dat)
-				f.write(dat.encode('utf8'))
+				for d in dat:
+					z = "\t".join([str(_) for _ in d]) + '\n'
+					f.write( z.encode('utf8'))
+
+				# Space rows
+				f.write('\n\n'.encode('utf8'))
+
+				dat.clear()
+				for k,v in peaks_points.items():
+					score = __class__.scoreit(self.Params, cname,k,v)
+					d = (
+						k,
+						k/samps,
+						len(v['preRank']),
+						sum(v['preRank'])/len(v['preRank']),
+						len(v['sum/mean%max']),
+						sum(v['sum/mean%max'])/len(v['sum/mean%max']),
+						v['peakPercentile'],
+						v['varPercentile'],
+						",".join(map(str,score)),
+						sum(score),
+						",".join([str(_) for _ in v['potentials']]),
+					)
+					dat.append(d)
+				dat.sort(key=lambda _:_[0])
+
+				for d in dat:
+					z = "\t".join([str(_) for _ in d]) + '\n'
+					f.write( z.encode('utf8'))
 
 				filesaver(idx, f)
 
@@ -993,12 +1014,14 @@ class pyzestyecg:
 			if idx not in peaks:
 				var = variances[idx]
 				peaks[idx] = {
+					'potentials': [],
 					'preRank': [],
 					'sum/mean%max': [],
 					'peakPercentile': v['Maximum']['Percentile'],
 					'varPercentile': var,
 				}
 
+			peaks[idx]['potentials'].append(k)
 			peaks[idx]['preRank'].append( v['preRank'] )
 			peaks[idx]['sum/mean%max'].append( v['sum/mean%max'] )
 
