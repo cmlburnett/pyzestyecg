@@ -456,7 +456,7 @@ class pyzestyecg:
 
 		return final
 
-	def ExportPeaksByPNG(self, chans, peaks, correlate, keep, remove, user, final, intervals, noise, filegenerator, filesaver, width=10, speed=100):
+	def ExportPeaksByPNG(self, chans, potentials, peaks, correlate, keep, remove, user, final, intervals, noise, filegenerator, filesaver, width=10, speed=100):
 		"""
 		Export peak data that goes with each PNG file.
 		Lot of copy/paste logic from ExportPNG()
@@ -483,14 +483,56 @@ class pyzestyecg:
 
 		cname = chans[0]
 
-		rr = []
 		for idx,fidx in enumerate(r):
 			rseg = range(fidx, fidx+step)
 			# Filter out the peaks data for the time slice
-			match_points = [str(_) for _ in final[cname] if _ in rseg]
+			potentials_points = {k:v for k,v in potentials[cname].items() if k in rseg}
+			match_points = [_ for _ in final[cname] if _ in rseg]
+			keep_points = [_ for _ in keep[cname] if _ in rseg]
+			remove_points = [_ for _ in remove if _[0] == cname and _[1] in rseg]
+			userkeep_points = [_ for _ in user['Keep'][cname] if _ in rseg]
+			userremove_points = [_ for _ in user['Remove'][cname] if _ in rseg]
 
 			with filegenerator(idx) as f:
-				dat = "\n".join(match_points)
+				header = "Start\t%d\nEnd\t%d\nStep\t%d\nSamplingRate\t%d\nLead\t%s\n" % (fidx, fidx+step, step, freq, cname)
+				header += "\t".join(['Match','Keep','Remove','UserKeep','UserRemove','Ignored','Noisy','Window','pre','post','sum','ratio','sum/mean','preRank','sum/mean%max','MaximumPercentile','peakPercentile','varPercentile','Score'])
+				f.write(header.encode('utf8'))
+
+				dat = []
+				for k,v in potentials_points.items():
+					score = 0
+					if 'preRank' in v and 'sum/mean%max' in v and 'peakPercentile' in v and 'varPercentile' in v:
+						score = __class__.scoreit(params, cname,k,potentials[cname][k])
+					d = (
+						k,
+						int(k in match_points), # 1 if a final point, 0 if a potential point
+						int(k in keep_points), # 1 if a keep point
+						int(k in remove_points), # 1 if a remove point
+						int(k in userkeep_points), # 1 if a user kept point
+						int(k in userremove_points), # 1 if a user removed point
+						int(v['ignored']), # 1 if in an ignore interval
+						int(v['noisy']), # 1 if in a noise interval
+						v['window'],
+						v['pre'],
+						v['post'],
+						v['sum'],
+						v['ratio'],
+						v['sum/mean'],
+						v.get('preRank', 0),
+						v.get('sum/mean%max', 0),
+						v.get('Maximum', 0) and v['Maximum']['Percentile'] or 0,
+						v.get('peakPercentile', 0),
+						v.get('varPercentile', 0),
+						score,
+					)
+					d = [str(_) for _ in d]
+					d = "\t".join(d)
+					print([k, d])
+					dat.append(d)
+
+				dat = "\n".join(dat)
+				f.write(dat.encode('utf8'))
+
 				filesaver(idx, f)
 
 	def ExportRR(self, chans, peaks, correlate, keep, remove, user, final, intervals, noise, filegenerator, filesaver):
@@ -500,8 +542,6 @@ class pyzestyecg:
 		"""
 
 		for cname in chans:
-			dat = []
-
 			with filegenerator(cname) as f:
 				for idx in range(1,len(final[cname])):
 					s = final[cname][idx-1]
@@ -836,7 +876,7 @@ class pyzestyecg:
 				potentials[i] = {'window': width, 'pre': pre_area, 'post': post_area, 'sum': pre_area + post_area, 'ratio': ratio, 'sum/mean': pre_area/mean_area}
 
 				potentials[i]['ignored'] = any([i in _ for _ in ignores])
-				potentials[i]['noisy'] = ([i in _ for _ in noises])
+				potentials[i]['noisy'] = any([i in _ for _ in noises])
 				break
 
 		# Delete, no longer needed
