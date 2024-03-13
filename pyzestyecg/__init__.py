@@ -372,8 +372,7 @@ class pyzestyecg:
 			sub += user['Keep'][cname]
 			sub = list(set(sub))
 			sub.sort()
-			# Store final list
-			final[cname] = sub
+			final[cname] = {k:{} for k in sub}
 
 			len_sub = len(sub)
 			print(['len sub', len_sub])
@@ -417,10 +416,10 @@ class pyzestyecg:
 		# Now go back through ECG data and find gaps larger than f0, particularly if an integer multiple suggesting missed complexes
 		print(['E', datetime.datetime.utcnow()])
 		too_soon = {k:[] for k in chans}
-		for cname in final.keys():
+		for cname in chans:
 			print(['E1', cname, datetime.datetime.utcnow()])
 			last_k = None
-			for k in sorted(final[cname]):
+			for k in sorted(final[cname].keys()):
 				# Skip first
 				if last_k is None:
 					last_k = k
@@ -429,6 +428,11 @@ class pyzestyecg:
 				h = (k-last_k)/f0
 				mult = round(h)
 				#print([cname, k, last_k, k-last_k, h, mult])
+				final[cname][k]['f0'] = f0
+				final[cname][k]['h'] = h
+				final[cname][k]['mult'] = mult
+				final[cname][k]['result'] = None
+				final[cname][k]['toosoon'] = False
 
 				if last_k in [_[0] for _ in too_soon[cname]]:
 					print("Don't penalize next peak after Too Soon point")
@@ -439,15 +443,19 @@ class pyzestyecg:
 					# Weird point, probably PAC/PVC or P wave
 					print("Too soon")
 					too_soon[cname].append( (k, last_k, h, mult) )
+					final[cname][k]['result'] = 'toosoon'
 					pass
 				elif h < self.Params['Cutoffs']['Harmonics']['High']:
 					# First harmonic, skip it
+					final[cname][k]['result'] = '1st'
 					pass
 				elif mult <= self.Params['Cutoffs']['Harmonics']['MaxMultiple']:
 					# Too many harmonics high
+					final[cname][k]['result'] = 'toomanyharmonics'
 					pass
 				else:
 					print("Harmonic")
+					final[cname][k]['result'] = 'harmonic'
 					print([last_k, k, mult, list(harmonicrange(last_k, k, mult))])
 					for idx in harmonicrange(last_k, k, mult):
 						__class__.findmissingharmonicpeak(peaks, final, correlate, cname, last_k, k, idx, self.Params, chans)
@@ -461,7 +469,10 @@ class pyzestyecg:
 		print(too_soon)
 		for cname in too_soon.keys():
 			for k, last_k, h, mult in too_soon[cname]:
-				final[cname].remove(k)
+				final[cname][k]['toosoon'] = True
+
+		print(final)
+		raise NotImplementedError
 
 		return final
 
@@ -508,7 +519,7 @@ class pyzestyecg:
 				remove_points = [_ for _ in remove if _[0] == cname and _[1] in rseg]
 				userkeep_points = [_ for _ in user['Keep'][cname] if _ in rseg]
 				userremove_points = [_ for _ in user['Remove'][cname] if _ in rseg]
-				final_points = [_ for _ in final[cname] if _ in rseg]
+				final_points = {k:v for k,v in final[cname].items() for k in rseg}
 
 				with filegenerator(idx) as f:
 					header = "Start\t%d\nEnd\t%d\nStep\t%d\nSamplingRate\t%d\nLead\t%s\n" % (fidx, fidx+step, step, freq, cname)
@@ -516,7 +527,7 @@ class pyzestyecg:
 					header += '\n'
 					header += "\t".join(['Index','Time','len(preRank)','avg(preRank)','len(sum/mean%max)','avg(sum/mean%max)','peakPercentile','varPercentile','Score','sum(score)','Potentials'])
 					header += '\n'
-					header += "\t".join(['Index','Time'])
+					header += "\t".join(['Index','Time','f0','h','mult','result','toosoon'])
 					header += '\n\n'
 					f.write(header.encode('utf8'))
 
@@ -578,10 +589,16 @@ class pyzestyecg:
 
 					# Write final points
 					dat.clear()
-					for k in final_points:
+					for k,v in final_points.items():
+						print(['final', cname, k, v])
 						d = (
 							k,
 							k/freq,
+							v['f0'],
+							v['h'],
+							v['mult'],
+							v['result'],
+							v['toosoon'],
 						)
 						dat.append(d)
 					dat.sort(key=lambda _:_[0])
@@ -600,9 +617,12 @@ class pyzestyecg:
 
 		for cname in chans:
 			with filegenerator(cname) as f:
-				for idx in range(1,len(final[cname])):
-					s = final[cname][idx-1]
-					e = final[cname][idx]
+				keys = list(final[cname].keys())
+				for idx in range(1,len(final[cname].keys())):
+					prek = keys[idx-1]
+					k = keys[idx]
+					s = final[cname][prek]
+					e = final[cname][k]
 					z = "%d\t%d\t%d\n" % (s,e,e-s)
 					f.write(z.encode('utf8'))
 
@@ -723,8 +743,9 @@ class pyzestyecg:
 						cnt += 1
 
 				idx += 1
-			#print(['corr', cnt])
-			if cnt >= 3:
+			print(['corr', cnt])
+			if cnt >= params['Cutoffs']['Harmonics']['LeadCorrelates']:
+				#final[cname][k][p]['result'] = 
 				keep_keys[cname].append(p)
 				keep_keys[cname].sort()
 				break
