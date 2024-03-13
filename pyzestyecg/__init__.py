@@ -505,7 +505,7 @@ class pyzestyecg:
 				for k,v in potentials_points.items():
 					d = (
 						k,
-						k/samps,
+						k/freq,
 						int(k in keep_points), # 1 if a keep point
 						int(k in remove_points), # 1 if a remove point
 						int(k in userkeep_points), # 1 if a user kept point
