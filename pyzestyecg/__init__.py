@@ -158,7 +158,7 @@ class pyzestyecg:
 					'minimum': (1000.0, -100),
 					'desired': (5000.0, +1),
 				},
-				'Points': 4,
+				'Points': 3,
 			},
 			'LeadCorrelateWindow': 10,
 			'PNG': {
@@ -708,18 +708,18 @@ class pyzestyecg:
 		"""
 		p = []
 
-		if len(v['preRank']) <= 3:
+		if len(v['preRank']) < 2:
 			p.append(-100)
-		elif len(v['preRank']) == 4:
+		elif len(v['preRank']) in (2,3,4):
 			p.append(0)
 		elif len(v['preRank']) == 5:
 			p.append(1)
 		else:
 			p.append( len(v['preRank']) - 5 )
 
-		if len(v['sum/mean%max']) <= 3:
+		if len(v['sum/mean%max']) < 2:
 			p.append(-100)
-		elif len(v['sum/mean%max']) == 4:
+		elif len(v['sum/mean%max']) in (2,3,4):
 			p.append(0)
 		elif len(v['sum/mean%max']) == 5:
 			p.append(1)
