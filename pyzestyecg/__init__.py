@@ -456,7 +456,7 @@ class pyzestyecg:
 
 		return final
 
-	def ExportPeaksByPNG(self, chans, potentials, peaks, correlate, keep, remove, user, final, intervals, noise, filegenerator, filesaver, width=10, speed=100):
+	def ExportPeaksByPNG(self, chans, potentials, peaks, correlate, keep, remove, user, final, intervals, noise, filegenerator, filesaver_peaks, filesaver_RR, width=10, speed=100):
 		"""
 		Export peak data that goes with each PNG file.
 		Lot of copy/paste logic from ExportPNG()
@@ -481,80 +481,87 @@ class pyzestyecg:
 		r = range(0, delta, step)
 		### COPY/pASTE FROM EXPORTPNG ###
 
-		cname = chans[0]
+		# Save a channels list
+		with filegenerator(0) as f:
+			dat = '\n'.join(chans)
+			dat = dat.encode('utf8')
+			f.write(dat)
+			filesaver_RR('channels', f)
 
 		for idx,fidx in enumerate(r):
 			rseg = range(fidx, fidx+step)
-			# Filter out the peaks data for the time slice
-			potentials_points = {k:v for k,v in potentials[cname].items() if k in rseg}
-			peaks_points = {k:v for k,v in peaks[cname].items() if k in rseg}
-			keep_points = [_ for _ in keep[cname] if _ in rseg]
-			remove_points = [_ for _ in remove if _[0] == cname and _[1] in rseg]
-			userkeep_points = [_ for _ in user['Keep'][cname] if _ in rseg]
-			userremove_points = [_ for _ in user['Remove'][cname] if _ in rseg]
 
-			with filegenerator(idx) as f:
-				header = "Start\t%d\nEnd\t%d\nStep\t%d\nSamplingRate\t%d\nLead\t%s\n" % (fidx, fidx+step, step, freq, cname)
-				header += "\t".join(['Index','Time','Keep','Remove','UserKeep','UserRemove','Ignored','Noisy','Window','pre','post','sum','ratio','sum/mean','MaximumIndex','MaximumPercentile'])
-				header += '\n'
-				header += "\t".join(['Index','Time','len(preRank)','avg(preRank)','len(sum/mean%max)','avg(sum/mean%max)','peakPercentile','varPercentile','Score','sum(score)','Potentials'])
-				header += '\n\n'
-				f.write(header.encode('utf8'))
+			for cname in chans:
+				# Filter out the peaks data for the time slice
+				potentials_points = {k:v for k,v in potentials[cname].items() if k in rseg}
+				peaks_points = {k:v for k,v in peaks[cname].items() if k in rseg}
+				keep_points = [_ for _ in keep[cname] if _ in rseg]
+				remove_points = [_ for _ in remove if _[0] == cname and _[1] in rseg]
+				userkeep_points = [_ for _ in user['Keep'][cname] if _ in rseg]
+				userremove_points = [_ for _ in user['Remove'][cname] if _ in rseg]
 
-				dat = []
-				for k,v in potentials_points.items():
-					d = (
-						k,
-						k/freq,
-						int(k in keep_points), # 1 if a keep point
-						int(k in remove_points), # 1 if a remove point
-						int(k in userkeep_points), # 1 if a user kept point
-						int(k in userremove_points), # 1 if a user removed point
-						int(v['ignored']), # 1 if in an ignore interval
-						int(v['noisy']), # 1 if in a noise interval
-						v['window'],
-						v['pre'],
-						v['post'],
-						v['sum'],
-						v['ratio'],
-						v['sum/mean'],
-						v.get('Maximum', 0) and v['Maximum']['idx'] or 0,
-						v.get('Maximum', 0) and v['Maximum']['Percentile'] or 0,
-					)
-					dat.append(d)
-				dat.sort(key=lambda _:_[0])
+				with filegenerator(idx) as f:
+					header = "Start\t%d\nEnd\t%d\nStep\t%d\nSamplingRate\t%d\nLead\t%s\n" % (fidx, fidx+step, step, freq, cname)
+					header += "\t".join(['Index','Time','Keep','Remove','UserKeep','UserRemove','Ignored','Noisy','Window','pre','post','sum','ratio','sum/mean','MaximumIndex','MaximumPercentile'])
+					header += '\n'
+					header += "\t".join(['Index','Time','len(preRank)','avg(preRank)','len(sum/mean%max)','avg(sum/mean%max)','peakPercentile','varPercentile','Score','sum(score)','Potentials'])
+					header += '\n\n'
+					f.write(header.encode('utf8'))
 
-				for d in dat:
-					z = "\t".join([str(_) for _ in d]) + '\n'
-					f.write( z.encode('utf8'))
+					dat = []
+					for k,v in potentials_points.items():
+						d = (
+							k,
+							k/freq,
+							int(k in keep_points), # 1 if a keep point
+							int(k in remove_points), # 1 if a remove point
+							int(k in userkeep_points), # 1 if a user kept point
+							int(k in userremove_points), # 1 if a user removed point
+							int(v['ignored']), # 1 if in an ignore interval
+							int(v['noisy']), # 1 if in a noise interval
+							v['window'],
+							v['pre'],
+							v['post'],
+							v['sum'],
+							v['ratio'],
+							v['sum/mean'],
+							v.get('Maximum', 0) and v['Maximum']['idx'] or 0,
+							v.get('Maximum', 0) and v['Maximum']['Percentile'] or 0,
+						)
+						dat.append(d)
+					dat.sort(key=lambda _:_[0])
 
-				# Space rows
-				f.write('\n\n'.encode('utf8'))
+					for d in dat:
+						z = "\t".join([str(_) for _ in d]) + '\n'
+						f.write( z.encode('utf8'))
 
-				dat.clear()
-				for k,v in peaks_points.items():
-					score = __class__.scoreit(self.Params, cname,k,v)
-					d = (
-						k,
-						k/samps,
-						len(v['preRank']),
-						sum(v['preRank'])/len(v['preRank']),
-						len(v['sum/mean%max']),
-						sum(v['sum/mean%max'])/len(v['sum/mean%max']),
-						v['peakPercentile'],
-						v['varPercentile'],
-						",".join(map(str,score)),
-						sum(score),
-						",".join([str(_) for _ in v['potentials']]),
-					)
-					dat.append(d)
-				dat.sort(key=lambda _:_[0])
+					# Space rows
+					f.write('\n\n'.encode('utf8'))
 
-				for d in dat:
-					z = "\t".join([str(_) for _ in d]) + '\n'
-					f.write( z.encode('utf8'))
+					dat.clear()
+					for k,v in peaks_points.items():
+						score = __class__.scoreit(self.Params, cname,k,v)
+						d = (
+							k,
+							k/freq,
+							len(v['preRank']),
+							sum(v['preRank'])/len(v['preRank']),
+							len(v['sum/mean%max']),
+							sum(v['sum/mean%max'])/len(v['sum/mean%max']),
+							v['peakPercentile'],
+							v['varPercentile'],
+							",".join(map(str,score)),
+							sum(score),
+							",".join([str(_) for _ in v['potentials']]),
+						)
+						dat.append(d)
+					dat.sort(key=lambda _:_[0])
 
-				filesaver(idx, f)
+					for d in dat:
+						z = "\t".join([str(_) for _ in d]) + '\n'
+						f.write( z.encode('utf8'))
+
+					filesaver_peaks(idx,cname, f)
 
 	def ExportRR(self, chans, peaks, correlate, keep, remove, user, final, intervals, noise, filegenerator, filesaver):
 		"""
@@ -608,7 +615,6 @@ class pyzestyecg:
 			axs[i].get_xaxis().set_visible(False)
 		axs[-1].get_xaxis().set_visible(True)
 
-		print(['PNG', (tstart, tend), delta, freq, samps, step, r, len(r)])
 		for idx,fidx in enumerate(r):
 			print(['page', datetime.datetime.utcnow(), (idx, len(r)), (fidx, tend, tend-fidx)])
 			# idx -- File index
