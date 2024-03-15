@@ -457,7 +457,7 @@ class pyzestyecg:
 				last_k = k
 
 		# 6F)
-		# TODO: for now just remove them
+		# TODO: for now just remove them by flagging them
 		print(['F', datetime.datetime.utcnow()])
 		for cname in too_soon.keys():
 			for k, last_k, h, mult in too_soon[cname]:
@@ -604,25 +604,79 @@ class pyzestyecg:
 		One file per lead in the EKG.
 		"""
 
+		# Map interval name to the RR's within the range
+		int_rrs = {}
+
+		# Map ranges to the analysis interval
+		int_map = {}
+		for k,v in intervals.items():
+			km = range(v[0], v[1])
+			int_map[km] = k
+			int_rrs[k] = {cname:[] for cname in chans}
+
+		# Save all RR's for each lead (include start,stop times)
+		# Each row provides the start and end frame in the WIFFECG file
+		# The DELTA is the difference between them (ie, the RR interval)
+		# Additionally, any named intervals that include the RR interval in its entirely is listed after the delta
+		# There may be none, one, or many additional columns of interval names
+		#   START END DELTA INTERVAL1 INTERVAL2 ...
 		for cname in chans:
 			with filegenerator(cname) as f:
+				# Get all keys on this lead
 				keys = list(final[cname].keys())
 
+				# Start iterating from [1] with previous index [0] and then increment from there
 				last_idx = 0
 				for idx in range(1,len(keys)):
 					print([last_idx, idx, len(keys)])
 					s = keys[last_idx]
 					e = keys[idx]
+					d = e-s
 
-					# Skip these
+					# Skip these (note that last_idx doesn't change so RR should be correct)
 					if final[cname][e]['toosoon']:
 						continue
 
-					z = "%d\t%d\t%d\n" % (s,e,e-s)
+					# Include RR if it starts and ends within the interval time (cannot overlap with start/end outside the range)
+					names = []
+					for r in int_map.keys():
+						if s in r and e in r:
+							k = int_map[r]
+							int_rrs[k][cname].append(d)
+							names.append(k)
+
+					# Save for this lead: START END DELTA and any named intervals
+					z = "%d\t%d\t%d" % (s,e,d)
+					names = list(set(names))
+					if len(names):
+						names.sort()
+						z += '\t' + '\t'.join(names)
+					a += '\n'
+
 					f.write(z.encode('utf8'))
 					last_idx = idx
 
 				filesaver(cname,f)
+
+		# Save all RR data for each interval
+		#   Lead I	RR1	RR2	RR3	RR4	...
+		#   Lead II	RR1	RR2	RR3	RR4	...
+		#   ...
+		for k in int_rrs.keys():
+			with filegenerator("named-%s"%k) as f:
+
+				# With one lead per row with first column being the lead name
+				for cname in int_rrs[k]:
+					# Write lead name first
+					# If the lead has no intervals mapped to it, then it would be a simple line of "NAME\n" without any data
+					f.write(cname.encode('utf8'))
+
+					# Write each value as a tab-delimited column
+					for v in int_rrs[k][cname]:
+						f.write(("\t%d"%v).encode('utf8'))
+					f.write('\n'.encode('utf8'))
+
+				filesaver('named-%s'%k, f)
 
 	def ExportPNG(self, peaks, filegenerator, filesaver, width=10, speed=100):
 		"""
